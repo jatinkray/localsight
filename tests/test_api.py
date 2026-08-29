@@ -115,3 +115,37 @@ def test_signed_video_url_access(client, admin_auth):
 def test_user_management_requires_privilege(client, viewer_auth):
     r = client.post("/api/users", json={"email": "x@y.z", "password": "NewUserPw1234", "role": "VIEWER"}, headers=viewer_auth)
     assert r.status_code == 403
+
+
+def test_tplink_presets_listed(client, admin_auth):
+    res = client.get("/api/cameras/presets", headers=admin_auth)
+    assert res.status_code == 200
+    vendors = {p["vendor"] for p in res.json()}
+    assert {"vigi_camera", "vigi_nvr", "tapo"} <= vendors
+    vigi_nvr = next(p for p in res.json() if p["vendor"] == "vigi_nvr")
+    assert "live/ch/" in vigi_nvr["main_stream"]
+    assert vigi_nvr["onvif_ports"] == [80, 2020]
+
+
+def test_provision_vigi_nvr_creates_channels(client, admin_auth):
+    res = client.post("/api/cameras/from-nvr", json={
+        "nvr_ip": "192.168.99.50", "nvr_name": "VIGI NVR", "channel_count": 2,
+    }, headers=admin_auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["nvr_host"] == "192.168.99.50"
+    assert len(body["cameras"]) == 2
+    for c in body["cameras"]:
+        assert "/live/ch/" in c["main_stream"]
+        assert c["sub_stream"].endswith("/stream/2")
+    # cameras are listed and linked to the NVR
+    cams = client.get("/api/cameras", headers=admin_auth).json()
+    assert len([c for c in cams if c["nvr_device_id"] == body["nvr_id"]]) == 2
+
+
+def test_from_nvr_blocks_metadata_ip(client, admin_auth):
+    # SSRF egress guard must reject link-local/metadata destinations.
+    res = client.post("/api/cameras/from-nvr", json={
+        "nvr_ip": "169.254.169.254", "channel_count": 1,
+    }, headers=admin_auth)
+    assert res.status_code == 400

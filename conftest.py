@@ -22,6 +22,7 @@ os.environ.setdefault("BOOTSTRAP_ADMIN_EMAIL", "admin@test.com")
 os.environ.setdefault("BOOTSTRAP_ADMIN_PASSWORD", "Sup3rStr0ngPw!")
 os.environ.setdefault("STORAGE_LOCAL_ROOT", "./data/test_storage")
 os.environ.setdefault("AI_IDENTITY_RECOGNITION_ENABLED", "false")
+os.environ.setdefault("SSRF_ALLOWLIST", "192.168.99.0/24")
 
 import pytest
 from fastapi.testclient import TestClient

@@ -86,6 +86,13 @@ ui/               static dashboard (served at /)
 tests/            unit + security + integration
 ```
 
+## Camera/NVR compatibility
+LocalVision is RTSP/ONVIF-native. It works with **TP-Link VIGI** cameras and
+**VIGI NVR** recorders out of the box (per-channel RTSP `live/ch/<N>/stream/<1|2>`),
+and with **wired Tapo** cameras. `POST /api/cameras/from-nvr` provisions a whole
+VIGI NVR in one call; `GET /api/cameras/presets` returns vendor URL templates. See
+`docs/integrations/tplink-vigi.md`.
+
 ## Status vs. plan
 
 Implemented and tested: auth (Argon2id, JWT rotation, MFA, lockout), RBAC,

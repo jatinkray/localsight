@@ -17,6 +17,8 @@ Base path `/api`. All responses are JSON. All mutating/protected endpoints requi
 | Method | Path | Permission |
 |--------|------|-----------|
 | GET/POST | `/api/cameras` | `camera:view` / `camera:configure` |
+| GET | `/api/cameras/presets` | `camera:view` (vendor RTSP/ONVIF URL templates, incl. TP-Link) |
+| POST | `/api/cameras/from-nvr` | `camera:configure` (provision a VIGI NVR + all channels) |
 | GET/PUT/DELETE | `/api/cameras/{id}` | `camera:view` / `camera:configure` |
 | GET/POST | `/api/nvr` | `camera:configure` |
 

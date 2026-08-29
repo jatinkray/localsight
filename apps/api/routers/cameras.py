@@ -20,9 +20,11 @@ from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from packages.domain.models import Camera, NvrDevice, User
+from packages.domain.schemas import TPLinkNvrSeed
 from packages.security.crypto import CryptoBox
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
+from packages.video import tplink
 
 router = APIRouter(prefix="/api", tags=["cameras"])
 
@@ -61,6 +63,68 @@ def list_nvr(db: Session = Depends(get_db)):
     rows = db.query(NvrDevice).all()
     return [{"id": r.id, "name": r.name, "host": r.host, "port": r.port,
              "onvif_supported": r.onvif_supported} for r in rows]
+
+
+@router.get("/cameras/presets", dependencies=[Depends(require_permission("camera:view"))])
+def stream_presets():
+    """Vendor stream URL templates. TP-Link VIGI/Tapo conventions included."""
+    return tplink.list_profiles()
+
+
+@router.post("/cameras/from-nvr", dependencies=[Depends(require_permission("camera:configure"))])
+def provision_tplink_nvr(body: TPLinkNvrSeed, request: Request, db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)):
+    """Create a TP-Link VIGI NVR and one Camera per channel.
+
+    Each camera gets the per-channel RTSP URL rtsp://<nvr>/live/ch/<N>/stream/<1|2>
+    (main for recording, sub for AI). All URLs are SSRF-validated and encrypted.
+    """
+    crypto: CryptoBox = rt.crypto
+    nvr = NvrDevice(
+        name=body.nvr_name,
+        host=body.nvr_ip,
+        port=body.onvif_port,
+        onvif_supported=True,
+        username_enc=crypto.encrypt_str(body.username) if body.username else None,
+        password_enc=crypto.encrypt_str(body.password) if body.password else None,
+    )
+    db.add(nvr)
+    db.flush()
+    created: list[dict] = []
+    for ch in range(body.start_channel, body.start_channel + body.channel_count):
+        main_url = tplink.nvr_channel_rtsp_url(body.nvr_ip, ch, stream="main", port=body.rtsp_port,
+                                               user=body.username, password=body.password)
+        sub_url = tplink.nvr_channel_rtsp_url(body.nvr_ip, ch, stream="sub", port=body.rtsp_port,
+                                              user=body.username, password=body.password)
+        for label, url in (("stream_url", main_url), ("substream_url", sub_url)):
+            try:
+                validate_egress_url(url, allowlist=rt.settings.ssrf_allowlist_cidrs)
+            except UnsafeUrlError as exc:
+                db.rollback()
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail=f"channel {ch} {label}: {exc}") from exc
+        cam = Camera(
+            name=f"{body.nvr_name} ch{ch}",
+            nvr_device_id=nvr.id,
+            stream_url_enc=crypto.encrypt_str(main_url),
+            substream_url_enc=crypto.encrypt_str(sub_url),
+            resolution="",
+            fps=0,
+            timezone="UTC",
+            retention={"days": body.retention_days},
+            status="OFFLINE",
+        )
+        db.add(cam)
+        db.flush()
+        created.append({"id": cam.id, "name": cam.name, "channel": ch,
+                        "main_stream": main_url, "sub_stream": sub_url})
+    write_audit(db, user=request.state.user, action="nvr.create", resource=nvr.id,
+                request_id=getattr(request.state, "request_id", "-"),
+                detail={"channels": body.channel_count, "vendor": "vigi_nvr"})
+    write_audit(db, user=request.state.user, action="camera.bulk_create", resource=nvr.id,
+                request_id=getattr(request.state, "request_id", "-"),
+                detail={"count": len(created)})
+    db.commit()
+    return {"nvr_id": nvr.id, "nvr_host": nvr.host, "cameras": created}
 
 
 @router.post("/cameras", dependencies=[Depends(require_permission("camera:configure"))])
@@ -109,6 +173,7 @@ def list_cameras(db: Session = Depends(get_db)):
             "id": r.id,
             "name": r.name,
             "camera_uid": r.camera_uid,
+            "nvr_device_id": r.nvr_device_id,
             "status": r.status,
             "health": r.health,
             "last_seen": r.last_seen.isoformat() if r.last_seen else None,
@@ -129,6 +194,7 @@ def get_camera(camera_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="camera not found")
     return {
         "id": cam.id, "name": cam.name, "camera_uid": cam.camera_uid,
+        "nvr_device_id": cam.nvr_device_id,
         "status": cam.status, "health": cam.health,
         "last_seen": cam.last_seen.isoformat() if cam.last_seen else None,
         "resolution": cam.resolution, "fps": cam.fps, "timezone": cam.timezone,

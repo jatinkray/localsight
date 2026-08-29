@@ -117,6 +117,24 @@ class NvrOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TPLinkNvrSeed(BaseModel):
+    """Provision a TP-Link VIGI NVR and all of its channels in one call.
+
+    Builds per-channel RTSP URLs (rtsp://<nvr>/live/ch/<N>/stream/<1|2>) and
+    creates an NvrDevice plus one Camera per channel. Credentials are optional
+    (VIGI uses digest auth); when given they are encrypted at rest.
+    """
+    nvr_ip: str
+    nvr_name: str = "VIGI NVR"
+    username: str | None = None
+    password: str | None = None
+    channel_count: int = Field(default=8, ge=1, le=64)
+    start_channel: int = Field(default=1, ge=0, le=64)
+    rtsp_port: int = 554
+    onvif_port: int = 80
+    retention_days: int = Field(default=7, ge=1, le=3650)
+
+
 # ── Persons / identity ──────────────────────────────────────────────────────
 class PersonCreate(BaseModel):
     label: str = Field(min_length=1)

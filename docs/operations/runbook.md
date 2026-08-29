@@ -1,5 +1,8 @@
 # Operations Runbook
 
+## Vendor integrations
+- **TP-Link VIGI / Tapo**: RTSP/ONVIF-native. `POST /api/cameras/from-nvr` provisions a whole VIGI NVR in one call; `GET /api/cameras/presets` lists URL templates. Setup, ports, auth, and caveats: `docs/integrations/tplink-vigi.md`.
+
 ## Local run (no containers)
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
