@@ -1,0 +1,16 @@
+# LocalVision
+.env
+*.db
+*.sqlite3
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+data/
+dist/
+build/
+*.log
+.DS_Store
+localvision.egg-info/

@@ -1,0 +1,97 @@
+# LocalVision — local-first deployment (Docker Compose).
+#
+# Brings up: PostgreSQL (+pgvector), the API, the AI/video worker, and an nginx
+# reverse proxy (TLS termination + security headers). Stores data on local
+# volumes. No cloud dependencies; the system runs fully offline.
+#
+# Secrets: use ./config.env (git-ignored) or Docker secrets. Never commit them.
+# Generate a config with:  python scripts/gen_env.py  (writes .env)
+#
+# Usage:
+#   docker compose -f infrastructure/compose/docker-compose.yml --env-file .env up --build
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: localvision
+      POSTGRES_USER: localvision
+      # Use a Docker secret / real password in production, not this placeholder.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U localvision"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
+    command: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+psycopg://localvision:${DB_PASSWORD:-changeme}@postgres:5432/localvision
+      JWT_SECRET: ${JWT_SECRET}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
+      STORAGE_BACKEND: local
+      STORAGE_LOCAL_ROOT: /app/data/storage
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
+      SSRF_ALLOWLIST: ${SSRF_ALLOWLIST:-}
+      AI_DETECTOR: ${AI_DETECTOR:-reference}
+      AI_IDENTITY_RECOGNITION_ENABLED: ${AI_IDENTITY_RECOGNITION_ENABLED:-false}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@localvision.local}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
+    volumes:
+      - storage:/app/data/storage
+      - ./models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/live').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
+    command: python -m apps.worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://localvision:${DB_PASSWORD:-changeme}@postgres:5432/localvision
+      JWT_SECRET: ${JWT_SECRET}
+      MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
+      STORAGE_BACKEND: local
+      STORAGE_LOCAL_ROOT: /app/data/storage
+      AI_DETECTOR: ${AI_DETECTOR:-reference}
+      AI_IDENTITY_RECOGNITION_ENABLED: ${AI_IDENTITY_RECOGNITION_ENABLED:-false}
+    volumes:
+      - storage:/app/data/storage
+      - ./models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./../nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  storage:

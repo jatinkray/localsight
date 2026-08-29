@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LocalVision</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="login" class="login hidden">
+    <form id="login-form" class="card">
+      <h1>LocalVision</h1>
+      <p class="muted">Local-first video intelligence</p>
+      <label>Email<input id="email" type="email" autocomplete="username" required /></label>
+      <label>Password<input id="password" type="password" autocomplete="current-password" required /></label>
+      <label>MFA code (if enabled)<input id="mfa" type="text" inputmode="numeric" autocomplete="one-time-code" /></label>
+      <button type="submit">Sign in</button>
+      <div id="login-error" class="error"></div>
+    </form>
+  </div>
+
+  <div id="app" class="hidden">
+    <header>
+      <div class="brand">LocalVision</div>
+      <nav>
+        <button data-view="dashboard" class="active">Dashboard</button>
+        <button data-view="cameras">Cameras</button>
+        <button data-view="events">Events</button>
+        <button data-view="timeline">Timeline</button>
+        <button data-view="people">People</button>
+        <button data-view="audit">Audit</button>
+      </nav>
+      <button id="logout" class="ghost">Sign out</button>
+    </header>
+
+    <main>
+      <section data-panel="dashboard" class="panel">
+        <div id="stat-cards" class="cards"></div>
+        <div id="health" class="card"></div>
+      </section>
+
+      <section data-panel="cameras" class="panel hidden">
+        <div class="card"><h2>Cameras</h2><div id="cameras-list"></div></div>
+      </section>
+
+      <section data-panel="events" class="panel hidden">
+        <div class="card">
+          <h2>Events</h2>
+          <div class="filters">
+            <input id="ev-camera" placeholder="camera id" />
+            <select id="ev-status">
+              <option value="">any status</option>
+              <option value="known">known</option>
+              <option value="unknown">unknown</option>
+              <option value="uncertain">uncertain</option>
+            </select>
+            <button id="ev-search">Search</button>
+          </div>
+          <table id="events-table"><thead><tr>
+            <th>Camera</th><th>Identity</th><th>Status</th><th>Start</th><th>End</th><th>Conf</th><th></th>
+          </tr></thead><tbody></tbody></table>
+          <div class="pager">
+            <button id="ev-prev">Prev</button><span id="ev-page">1</span><button id="ev-next">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <section data-panel="timeline" class="panel hidden">
+        <div class="card">
+          <h2>Daily timeline</h2>
+          <div class="filters">
+            <input id="tl-date" type="date" />
+            <input id="tl-camera" placeholder="camera id (optional)" />
+            <button id="tl-go">Load</button>
+          </div>
+          <div id="timeline-out"></div>
+        </div>
+      </section>
+
+      <section data-panel="people" class="panel hidden">
+        <div class="card">
+          <h2>People / identities</h2>
+          <form id="person-form" class="row">
+            <input id="person-label" placeholder="employee-001" required />
+            <input id="person-name" placeholder="Display name" />
+            <button type="submit">Enroll person</button>
+          </form>
+          <div id="people-list"></div>
+        </div>
+      </section>
+
+      <section data-panel="audit" class="panel hidden">
+        <div class="card">
+          <h2>Audit log</h2>
+          <button id="audit-load">Load</button>
+          <table id="audit-table"><thead><tr>
+            <th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>Result</th><th>IP</th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
