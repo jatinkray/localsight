@@ -24,6 +24,7 @@ class Track:
     confidence: float
     center: tuple[float, float] = (0.0, 0.0)
     trajectory: List[tuple[float, float]] = field(default_factory=list)
+    label: str = "person"  # person | vehicle | bicycle | animal | bag | ...
 
 
 @dataclass

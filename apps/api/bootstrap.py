@@ -81,6 +81,28 @@ def init_db(rt: Runtime) -> None:
     # (see docs/operations/runbook.md). Idempotent and safe on existing schemas
     # only when no columns were added — use Alembic for evolving schemas.
     Base.metadata.create_all(rt.engine)
+    _ensure_columns(rt)
+
+
+def _ensure_columns(rt: Runtime) -> None:
+    """Defensively add columns introduced on existing tables.
+
+    `create_all` only creates missing *tables*, never ALTERs existing ones, so a
+    column added to a pre-existing table (e.g. `cameras.rules`) would otherwise be
+    missing on an upgraded database and crash the camera worker. This guards against
+    that without requiring Alembic for a single additive column.
+    """
+    from sqlalchemy import text
+
+    added = [
+        "ALTER TABLE cameras ADD COLUMN rules JSON",
+    ]
+    with rt.engine.begin() as conn:
+        for stmt in added:
+            try:
+                conn.execute(text(stmt))
+            except Exception:  # noqa: BLE001 - already present (or unsupported type)
+                pass
 
 
 def seed(rt: Runtime) -> None:

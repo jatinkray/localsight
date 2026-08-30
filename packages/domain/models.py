@@ -121,6 +121,10 @@ class Camera(Base):
     privacy_masks: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Per-camera retention overrides (days); null = global policy.
     retention: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Per-camera behavior-analytics rules (line/zone/loitering/object-left/crowd).
+    # Stored as JSON; consumed by the worker's RuleEngine. Privacy masks live
+    # alongside this as geometry the detector skips.
+    rules: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -261,6 +265,23 @@ class ModelVersion(Base):
     config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     __table_args__ = (UniqueConstraint("name", "version", name="uq_model_name_version"),)
+
+
+class AlertRoute(Base):
+    """Maps an analytic event type (or a specific rule_id) to a notification channel.
+
+    `config_enc` holds channel config (webhook URL, SMTP, recipients) encrypted at
+    rest; the channel secret is never returned to clients. Routing is evaluated by
+    the alerting layer when an AnalyticEvent is produced.
+    """
+    __tablename__ = "alert_routes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    rule_type: Mapped[str] = mapped_column(String(32), index=True)  # line_cross | intrusion | ... | anpr | *
+    camera_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    channel: Mapped[str] = mapped_column(String(16))  # webhook | email | push
+    config_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # Indexes for time-range and identity queries.

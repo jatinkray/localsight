@@ -11,6 +11,7 @@ Security notes:
 from __future__ import annotations
 
 import datetime as dt
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -25,8 +26,20 @@ from packages.security.crypto import CryptoBox
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
 from packages.video import tplink
+from packages.video import presets as vendor_presets
+from packages.video.onvif import OnvifClient
 
 router = APIRouter(prefix="/api", tags=["cameras"])
+
+
+def _mask_credentials(url: str) -> str:
+    """Return the URL with any embedded password replaced by '****' (never echo secrets)."""
+    p = urlparse(url)
+    if not p.password:
+        return url
+    user = p.username or ""
+    netloc = f"{user}:****@{p.hostname}" + (f":{p.port}" if p.port else "")
+    return urlunparse((p.scheme, netloc, p.path, p.params, p.query, p.fragment))
 
 
 class NvrBody(BaseModel):
@@ -69,6 +82,63 @@ def list_nvr(db: Session = Depends(get_db)):
 def stream_presets():
     """Vendor stream URL templates. TP-Link VIGI/Tapo conventions included."""
     return tplink.list_profiles()
+
+
+@router.get("/cameras/vendor-presets", dependencies=[Depends(require_permission("camera:view"))])
+def vendor_stream_presets():
+    """Broad vendor RTSP/CGI/ISAPI/ONVIF/GB-T 28181 URL conventions."""
+    return vendor_presets.list_profiles()
+
+
+class PresetBuild(BaseModel):
+    vendor: str
+    cam_ip: str = ""
+    channel: int = 1
+    stream: str = "sub"
+    user: str | None = None
+    password: str | None = None
+    port: int = 554
+
+
+@router.post("/cameras/presets/build", dependencies=[Depends(require_permission("camera:configure"))])
+def build_preset(body: PresetBuild):
+    try:
+        url = vendor_presets.build_url(
+            body.vendor, cam_ip=body.cam_ip, channel=body.channel, stream=body.stream,
+            user=body.user, password=body.password, port=body.port)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"vendor": body.vendor, "url": _mask_credentials(url)}
+
+
+class OnvifDiscover(BaseModel):
+    timeout: float = 2.0
+
+
+@router.post("/onvif/discover", dependencies=[Depends(require_permission("camera:configure"))])
+def onvif_discover(body: OnvifDiscover):
+    """WS-Discovery for ONVIF devices on the LAN. Returns device XAddrs."""
+    return {"xaddrs": OnvifClient.discover(timeout=body.timeout)}
+
+
+class OnvifStreams(BaseModel):
+    xaddr: str
+    user: str | None = None
+    password: str | None = None
+
+
+@router.post("/onvif/streams", dependencies=[Depends(require_permission("camera:configure"))])
+def onvif_streams(body: OnvifStreams, rt: Runtime = Depends(get_runtime)):
+    """Fetch RTSP stream URIs for an ONVIF device's profiles.
+
+    The operator-supplied `xaddr` is egress-validated before any outbound call.
+    """
+    try:
+        validate_egress_url(body.xaddr, allowlist=rt.settings.ssrf_allowlist_cidrs)
+    except UnsafeUrlError as exc:
+        raise HTTPException(status_code=400, detail=f"unsafe ONVIF address: {exc}")
+    client = OnvifClient(body.xaddr, user=body.user, password=body.password)
+    return {"xaddr": body.xaddr, "stream_uris": client.stream_uris()}
 
 
 @router.post("/cameras/from-nvr", dependencies=[Depends(require_permission("camera:configure"))])

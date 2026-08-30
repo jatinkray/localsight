@@ -20,6 +20,10 @@ PERMISSIONS: set[str] = {
     "system:configure",
     "audit:view",
     "user:manage",
+    "rules:configure",
+    "alerts:manage",
+    "analytics:view",
+    "live:view",
 }
 
 # Role -> permission set.
@@ -37,6 +41,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "events:export",
         "system:configure",
         "audit:view",
+        "rules:configure",
+        "alerts:manage",
+        "analytics:view",
+        "live:view",
     },
     "ANALYST": {
         "camera:view",
@@ -45,12 +53,16 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "events:view",
         "events:export",
         "audit:view",
+        "analytics:view",
+        "live:view",
     },
     "VIEWER": {
         "camera:view",
         "video:view",
         "person:view",
         "events:view",
+        "analytics:view",
+        "live:view",
     },
 }
 

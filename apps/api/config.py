@@ -36,16 +36,24 @@ class Settings(BaseSettings):
     storage_s3_region: str = "us-east-1"
     storage_s3_prefix: str = "localvision"
 
-    ai_detector: str = "reference"
+    ai_detector: str = "reference"  # reference | onnx | tensorrt | openvino | tflite
     ai_inference_fps: int = 5
     ai_confidence_threshold: float = 0.45
     ai_iou_threshold: float = 0.50
     ai_motion_gate_enabled: bool = True
     ai_recognize_interval_sec: float = 2.0
     ai_similarity_threshold: float = 0.85
+    ai_model_name: str = "detector"
+    ai_model_version: str = "latest"
     # Biometric identification is OFF by default (privacy by design). Enable only
     # after establishing a lawful basis and operator approval.
     ai_identity_recognition_enabled: bool = False
+    # Behavior analytics (rule engine) + ANPR are opt-in features.
+    ai_rules_enabled: bool = True
+    ai_anpr_enabled: bool = False
+    # Recording of the main stream (segmented, HLS-ready).
+    record_enabled: bool = True
+    record_segment_seconds: int = 300
 
     retention_recordings_days: int = 7
     retention_events_days: int = 30

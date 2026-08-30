@@ -16,6 +16,7 @@ never logged.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 from typing import List, Optional, Tuple
 
@@ -26,6 +27,16 @@ from packages.ai.interfaces import (
     IdentityMatcher,
     Track,
 )
+from packages.ai.rules import (
+    EVENT_CROWD,
+    EVENT_INTRUSION,
+    EVENT_LINE_CROSS,
+    EVENT_LOITERING,
+    EVENT_OBJECT_LEFT,
+    EVENT_OBJECT_REMOVED,
+    RuleEngine,
+)
+from packages.ai.anpr import ANPRPipeline
 from packages.domain.events import classify_identity
 from packages.domain.models import (
     Detection as DetectionRow,
@@ -72,6 +83,8 @@ class CameraPipeline:
         recognize_interval_sec: float = 2.0,
         model_version: str = "ref-v0",
         identity_recognition_enabled: bool = False,
+        rule_engine: RuleEngine | None = None,
+        anpr: ANPRPipeline | None = None,
     ) -> None:
         self.camera_id = camera_id
         self.detector = detector
@@ -86,6 +99,9 @@ class CameraPipeline:
         self.recognize_interval = recognize_interval_sec
         self.model_version = model_version
         self.recognition_enabled = bool(identity_recognition_enabled and face_chain and matcher)
+        self.rule_engine = rule_engine
+        self.anpr = anpr
+        self._last_analytic: list[EventRow] = []  # point-in-time events (rules/anpr) for alerting
 
         self._active: dict[str, _TrackState] = {}
         self._enrolled: List[Tuple[str, List[float], str]] = []
@@ -117,6 +133,40 @@ class CameraPipeline:
         tracks = self.tracker.update(self.camera_id, detections, ts)
         closed: List[EventRow] = []
 
+        # ── behavior analytics + ANPR (point-in-time events) ───────────────
+        self._last_analytic = []
+        if self.rule_engine is not None and tracks:
+            tracks_input = [(tr.track_id, tr.label, tr.bbox) for tr in tracks]
+            for ae in self.rule_engine.evaluate(tracks_input, ts):
+                ev = EventRow(
+                    camera_id=self.camera_id, track_id=ae.track_id,
+                    identity_status="unknown", event_type=ae.rule_type,
+                    timestamp_start=ae.ts, timestamp_end=ae.ts,
+                    confidence=ae.score, bbox={"x": ae.bbox[0], "y": ae.bbox[1],
+                                               "w": ae.bbox[2], "h": ae.bbox[3]},
+                )
+                session.add(ev)
+                self._last_analytic.append(ev)
+        if self.anpr is not None:
+            for tr in tracks:
+                if tr.label == "vehicle":
+                    reading = self.anpr.read(frame, ts)
+                    if reading:
+                        ev = EventRow(
+                            camera_id=self.camera_id, track_id=tr.track_id,
+                            identity_status="unknown", event_type="anpr",
+                            timestamp_start=ts, timestamp_end=ts, confidence=reading.confidence,
+                            bbox={"x": tr.bbox[0], "y": tr.bbox[1], "w": tr.bbox[2], "h": tr.bbox[3]},
+                            detail={
+                                "plate_enc": self.crypto.encrypt_str(reading.plate),
+                                "plate_hash": hashlib.sha256(
+                                    reading.plate.encode("utf-8")
+                                ).hexdigest()[:16],
+                            },
+                        )
+                        session.add(ev)
+                        self._last_analytic.append(ev)
+
         for tr in tracks:
             st = self._active.get(tr.track_id)
             if st is None:
@@ -139,7 +189,7 @@ class CameraPipeline:
                     camera_id=self.camera_id,
                     track_id=tr.track_id,
                     frame_ts=ts,
-                    label="person",
+                    label=tr.label,
                     confidence=tr.confidence,
                     bbox={"x": tr.bbox[0], "y": tr.bbox[1], "w": tr.bbox[2], "h": tr.bbox[3]},
                 )

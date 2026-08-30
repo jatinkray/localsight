@@ -14,6 +14,7 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from apps.api.bootstrap import build
@@ -29,6 +30,10 @@ from apps.api.routers import (
     timeline,
     users,
     video,
+    alerts,
+    analytics,
+    live,
+    rules,
 )
 from packages.observability.logging import configure_logging
 from packages.security.headers import SecurityHeadersMiddleware
@@ -79,12 +84,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(users.router)
     app.include_router(video.router)
     app.include_router(system.router)
+    app.include_router(alerts.router)
+    app.include_router(analytics.router)
+    app.include_router(live.router)
+    app.include_router(rules.router)
+
+    # Serve transcoded live HLS segments (written by the live gateway in live.py).
+    live_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "live")
+    os.makedirs(live_dir, exist_ok=True)
+    app.mount("/live-media", StaticFiles(directory=live_dir), name="live-media")
 
     # Serve the static dashboard (mounted last so /api and /health win).
     ui_dir = os.path.join(os.path.dirname(__file__), "..", "..", "ui")
     if os.path.isdir(ui_dir):
-        from fastapi.staticfiles import StaticFiles
-
         app.mount("/", StaticFiles(directory=ui_dir, html=True), name="ui")
 
     @app.exception_handler(Exception)

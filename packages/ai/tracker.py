@@ -49,11 +49,12 @@ class IouTracker(Tracker):
                 st = self._state[best_id]
                 st["bbox"] = det.bbox
                 st["age"] = 0
+                st["label"] = det.label
                 used.add(best_id)
                 cx = det.bbox[0] + det.bbox[2] / 2
                 cy = det.bbox[1] + det.bbox[3] / 2
                 st["traj"].append((round(cx, 3), round(cy, 3)))
-                out.append(Track(best_id, det.bbox, det.confidence, (cx, cy), st["traj"][-20:]))
+                out.append(Track(best_id, det.bbox, det.confidence, (cx, cy), st["traj"][-20:], det.label))
             else:
                 tid = self._next_id(camera_id)
                 cx = det.bbox[0] + det.bbox[2] / 2
@@ -61,9 +62,10 @@ class IouTracker(Tracker):
                 self._state[tid] = {
                     "bbox": det.bbox,
                     "age": 0,
+                    "label": det.label,
                     "traj": [(round(cx, 3), round(cy, 3))],
                 }
-                out.append(Track(tid, det.bbox, det.confidence, (cx, cy), self._state[tid]["traj"]))
+                out.append(Track(tid, det.bbox, det.confidence, (cx, cy), self._state[tid]["traj"], det.label))
         # age unmatched tracks
         for tid in list(self._state):
             if tid not in used:
