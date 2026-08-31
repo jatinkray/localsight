@@ -17,7 +17,7 @@ from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from packages.domain.models import AlertRoute, Event, User
-from packages.notify import Alert, MqttNotifier, WebhookNotifier
+from packages.notify import Alert, MqttNotifier, PushNotifier, WebhookNotifier
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
 
@@ -96,6 +96,15 @@ def test_alert(db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)
                     username=cfg.get("username"), password=cfg.get("password"),
                     tls=bool(cfg.get("tls", False)), qos=int(cfg.get("qos", 0)),
                     retain=bool(cfg.get("retain", True)),
+                ))
+            elif r.channel == "push":
+                notifiers.append(PushNotifier(
+                    server=cfg.get("server"), topic=cfg.get("topic"),
+                    auth_token=cfg.get("auth_token"),
+                    priority=cfg.get("priority"),
+                    tags=cfg.get("tags"),
+                    click=cfg.get("click"),
+                    title=cfg.get("title"),
                 ))
         except UnsafeUrlError:
             continue
