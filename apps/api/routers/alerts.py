@@ -17,7 +17,7 @@ from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from packages.domain.models import AlertRoute, Event, User
-from packages.notify import Alert, WebhookNotifier
+from packages.notify import Alert, MqttNotifier, WebhookNotifier
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
 
@@ -45,7 +45,7 @@ def list_routes(db: Session = Depends(get_db)):
 @router.post("/alerts/routes", dependencies=[Depends(require_permission("alerts:manage"))])
 def create_route(body: RouteCreate, request: Request, db: Session = Depends(get_db),
                  rt: Runtime = Depends(get_runtime)):
-    if body.channel not in ("webhook", "email", "push"):
+    if body.channel not in ("webhook", "email", "push", "mqtt"):
         raise HTTPException(status_code=400, detail="unknown channel")
     route = AlertRoute(
         rule_type=body.rule_type, camera_id=body.camera_id, channel=body.channel,
@@ -74,18 +74,33 @@ def delete_route(route_id: str, request: Request, db: Session = Depends(get_db))
 
 @router.post("/alerts/test", dependencies=[Depends(require_permission("alerts:manage"))])
 def test_alert(db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)):
-    """Deliver a synthetic test alert to every configured webhook route."""
+    """Deliver a synthetic test alert to every configured (webhook/mqtt) route.
+
+    A missing broker or bad route config is swallowed so the endpoint never 500s;
+    ``delivered`` counts only successful deliveries.
+    """
     notifiers = []
-    for r in db.query(AlertRoute).filter_by(channel="webhook", enabled=True).all():
+    for r in db.query(AlertRoute).filter_by(enabled=True).all():
         cfg = r.config_enc and rt.crypto.decrypt_json(r.config_enc) or {}
-        url = cfg.get("url")
-        if not url:
-            continue
         try:
-            validate_egress_url(url, allowlist=rt.settings.ssrf_allowlist_cidrs)
+            if r.channel == "webhook":
+                url = cfg.get("url")
+                if not url:
+                    continue
+                validate_egress_url(url, allowlist=rt.settings.ssrf_allowlist_cidrs)
+                notifiers.append(WebhookNotifier(url))
+            elif r.channel == "mqtt":
+                notifiers.append(MqttNotifier(
+                    host=cfg.get("host", "localhost"), port=int(cfg.get("port", 1883)),
+                    topic=cfg.get("topic", "localsight/alerts/{camera_id}/{rule_type}"),
+                    username=cfg.get("username"), password=cfg.get("password"),
+                    tls=bool(cfg.get("tls", False)), qos=int(cfg.get("qos", 0)),
+                    retain=bool(cfg.get("retain", True)),
+                ))
         except UnsafeUrlError:
             continue
-        notifiers.append(WebhookNotifier(url))
+        except Exception:  # noqa: BLE001 - bad route config / no broker must not 500
+            continue
     alert = Alert(rule_id="test", rule_type="test", camera_id="", severity="info",
                   title="LocalVision test alert", message="This is a connectivity test.",
                   ts=dt.datetime.now(dt.timezone.utc).isoformat())
