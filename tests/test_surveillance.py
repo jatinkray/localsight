@@ -8,6 +8,7 @@ required: pure-logic paths and lazy-import guards are exercised instead.
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 from packages.ai import detectors, rules
 from packages.ai.anpr import ANPRPipeline, ReferencePlateDetector, ReferencePlateOCR
@@ -24,6 +25,7 @@ from packages.ai.rules import (
 )
 from packages.ai.vlm import ReferenceSceneEmbedder, SemanticSearch
 from packages.domain.models import Camera, Event, Track
+from packages.notify import Alert, MqttNotifier
 from packages.video import onvif, presets
 from packages.video.recorder import Recorder, segment_boundary, segment_key
 
@@ -325,11 +327,66 @@ def test_alerts_api(client):
     assert all("config" not in item for item in listing)
     # unknown channel rejected
     assert client.post("/api/alerts/routes", json={"rule_type": "*", "channel": "telegram"}, headers=h).status_code == 400
+    # mqtt channel is supported and stored encrypted at rest
+    mqtt_cfg = {"host": "127.0.0.1", "port": 1883, "topic": "localsight/{camera_id}/alerts",
+                "username": "mqtt", "password": "s3cret"}
+    m = client.post("/api/alerts/routes", json={"rule_type": "*", "channel": "mqtt", "config": mqtt_cfg}, headers=h)
+    assert m.status_code == 200
+    mrid = m.json()["id"]
+    listing = client.get("/api/alerts/routes", headers=h).json()
+    assert any(item["id"] == mrid and item["channel"] == "mqtt" for item in listing)
+    assert all("config" not in item for item in listing)
+    # test alert does not crash with an mqtt route present (no broker -> 0 delivered)
+    assert client.post("/api/alerts/test", headers=h).json()["delivered"] == 0
+    assert client.delete(f"/api/alerts/routes/{mrid}", headers=h).status_code == 200
     # test alert delivers to 0 webhooks (env not set) -> no crash
     assert client.post("/api/alerts/test", headers=h).json()["delivered"] == 0
     # analytic events list works
     assert client.get("/api/alerts/events", headers=h).status_code == 200
     assert client.delete(f"/api/alerts/routes/{rid}", headers=h).status_code == 200
+
+
+# ── mqtt notifier ─────────────────────────────────────────────────────────────
+def test_mqtt_notifier():
+    captured = {}
+
+    def fake_publish(topic, payload, qos, retain):
+        captured["topic"] = topic
+        captured["payload"] = payload
+        captured["qos"] = qos
+        captured["retain"] = retain
+
+    ntf = MqttNotifier(
+        host="10.0.0.5", port=1883, topic="localsight/{rule_type}/{camera_id}",
+        publish=fake_publish, qos=1, retain=False,
+    )
+    alert = Alert(rule_id="r1", rule_type="intrusion", camera_id="cam-1",
+                  severity="warning", title="Intruder", message="someone is in zone",
+                  detail={"zone": "gate"}, ts="2026-01-01T00:00:00Z")
+    ntf.send(alert)
+
+    assert captured["topic"] == "localsight/intrusion/cam-1"
+    assert captured["qos"] == 1
+    assert captured["retain"] is False
+    body = json.loads(captured["payload"])
+    assert body["source"] == "localsight"
+    assert body["rule_id"] == "r1"
+    assert body["rule_type"] == "intrusion"
+    assert body["camera_id"] == "cam-1"
+    assert body["severity"] == "warning"
+    assert body["ts"] == "2026-01-01T00:00:00Z"
+
+
+def test_mqtt_notifier_topics_render_and_collapse():
+    seen = []
+    ntf = MqttNotifier(host="broker", publish=lambda t, p, q, r: seen.append(t))
+    ntf.send(Alert(rule_id="r1", rule_type="loitering", camera_id="cam-2"))
+    assert seen[-1] == "localsight/alerts/cam-2/loitering"
+
+    bare = MqttNotifier(host="broker", topic="localsight/{camera_id}///alerts",
+                        publish=lambda t, p, q, r: seen.append(t))
+    bare.send(Alert(rule_id="r2", rule_type="*", camera_id=""))
+    assert seen[-1] == "localsight/unknown/alerts"
 
 
 # ── live view API ───────────────────────────────────────────────────────────

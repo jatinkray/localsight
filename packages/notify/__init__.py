@@ -8,6 +8,8 @@ caller (apps.api.routers.alerts).
 """
 from __future__ import annotations
 
+import json
+import ssl
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
@@ -104,7 +106,81 @@ class PushNotifier(Notifier):
             self._handler(alert)
 
 
-_CHANNELS = {"webhook": WebhookNotifier, "email": EmailNotifier, "push": PushNotifier}
+class MqttNotifier(Notifier):
+    """MQTT notifier: publishes alerts as JSON to a broker.
+
+    The transport is injectable (``publish``) so the test suite never needs a live
+    broker; in production omit it and ``paho-mqtt`` is imported lazily. Topic
+    strings may template ``{camera_id}`` and ``{rule_type}``; empty segments are
+    collapsed so a ``*`` / blank rule produces a clean topic.
+    """
+
+    channel = "mqtt"
+
+    def __init__(
+        self,
+        host: str,
+        port: int = 1883,
+        topic: str = "localsight/alerts/{camera_id}/{rule_type}",
+        publish: Callable[[str, str, int, bool], None] | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        tls: bool = False,
+        qos: int = 0,
+        retain: bool = True,
+    ) -> None:
+        self.host = host
+        self.port = port
+        self.topic_template = topic
+        self._publish = publish
+        self.username = username
+        self.password = password
+        self.tls = tls
+        self.qos = qos
+        self.retain = retain
+
+    def _render_topic(self, alert: Alert) -> str:
+        camera = alert.camera_id or "unknown"
+        rule = alert.rule_type or "unknown"
+        topic = self.topic_template.replace("{camera_id}", camera).replace("{rule_type}", rule)
+        parts = [p for p in topic.split("/") if p]
+        return "/".join(parts) if parts else "localsight/alerts"
+
+    def _payload(self, alert: Alert) -> str:
+        return json.dumps(
+            {
+                "source": "localsight",
+                "rule_id": alert.rule_id,
+                "rule_type": alert.rule_type,
+                "camera_id": alert.camera_id,
+                "severity": alert.severity,
+                "title": alert.title,
+                "message": alert.message,
+                "detail": alert.detail,
+                "ts": alert.ts,
+            },
+            default=str,
+        )
+
+    def send(self, alert: Alert) -> None:
+        topic = self._render_topic(alert)
+        payload = self._payload(alert)
+        if self._publish:
+            self._publish(topic, payload, self.qos, self.retain)
+            return
+        try:
+            from paho.mqtt.publish import single as _publish_single
+        except ImportError as exc:
+            raise RuntimeError("paho-mqtt is required for MQTT delivery") from exc
+        auth = {"username": self.username, "password": self.password or ""} if self.username else None
+        tls_config = {"tls_version": ssl.PROTOCOL_TLS_CLIENT} if self.tls else None
+        _publish_single(
+            topic, payload, hostname=self.host, port=self.port,
+            auth=auth, tls=tls_config, qos=self.qos, retain=self.retain,
+        )
+
+
+_CHANNELS = {"webhook": WebhookNotifier, "email": EmailNotifier, "push": PushNotifier, "mqtt": MqttNotifier}
 
 
 def build_notifier(channel: str, config: dict) -> Notifier:
@@ -114,6 +190,18 @@ def build_notifier(channel: str, config: dict) -> Notifier:
         return WebhookNotifier(config["url"])
     if channel == "email":
         return EmailNotifier(config["smtp_host"], config["smtp_port"], config["sender"], config["recipients"])
+    if channel == "mqtt":
+        return MqttNotifier(
+            host=config.get("host", "localhost"),
+            port=int(config.get("port", 1883)),
+            topic=config.get("topic", "localsight/alerts/{camera_id}/{rule_type}"),
+            publish=config.get("_publish"),
+            username=config.get("username"),
+            password=config.get("password"),
+            tls=bool(config.get("tls", False)),
+            qos=int(config.get("qos", 0)),
+            retain=bool(config.get("retain", True)),
+        )
     return PushNotifier()
 
 
