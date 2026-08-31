@@ -27,10 +27,10 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
-# Workflow-level env: accessible via ${{ env.X }} in jobs, steps, and `with:` blocks.
-# Note: `env` context is restricted in job `name:` fields (line 67 originally failed
-# there) — we hardcode the Python version in names and use ${{ env.PYTHON_VERSION }}
-# in step `with:` blocks and `run:` scripts.
+# Workflow-level env: shared values accessible via ${{ env.X }} in steps
+# and step inputs/outputs. Note: env values cannot reference other env values
+# in the same scope (no interpolation) — values must be hardcoded everywhere
+# they are declared, but can be referenced as ${{ env.X }} from steps.
 env:
   PYTHON_VERSION: "3.12"
   REGISTRY: ghcr.io
@@ -41,11 +41,11 @@ jobs:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -69,7 +69,7 @@ jobs:
     name: Unit Tests (Python 3.12)
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
       DATABASE_URL: postgresql+psycopg://localvision:testpassword@localhost:5432/localvision_test
     services:
       postgres:
@@ -89,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -134,11 +134,11 @@ jobs:
     name: Dependency Security Audit
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -196,12 +196,12 @@ jobs:
     name: Semgrep SAST
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
       SEMGREP_SEND_METRICS: "off"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -270,9 +270,9 @@ jobs:
       packages: write
 
     env:
-      REGISTRY: ${{ vars.REGISTRY }}
+      REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository }}
-      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
 
     steps:
       - uses: actions/checkout@v4
