@@ -59,7 +59,9 @@ However, the product today is a **secure skeleton, not a surveillance-analytics 
 | **Analytics / BI** | ✅ `analytics.py`: people counting, occupancy, dwell, breakdown, heatmap | HIGH — filled |
 | **Edge runtime** (Jetson/OpenVINO/Coral) | ✅ `TensorRTDetector`/`OpenVINODetector`/`TFLiteDetector` stubs; interfaces ready | MEDIUM |
 | **VLM / semantic search** | ✅ `ReferenceSceneEmbedder` + `SemanticSearch`; endpoint ready | MEDIUM — filled |
-| **Tests** | 66 tests | MEDIUM — filled |
+| **Tests** | 66 tests + dedicated ONNX detector pure-logic tests (postprocess, NMS, lazy session) | MEDIUM — filled |
+| **CI/CD pipeline** | ✅ 9-job GitHub Actions pipeline: lint, unit tests (SQLite), integration (PostgreSQL), CodeQL, Semgrep, Trivy, multi-platform Docker, SBOM, release. 100% free-tier tools. | MEDIUM — filled |
+| **Container supply chain** | ✅ Multi-platform builds (amd64/arm64), SPDX SBOM, provenance attestation, GHCR auto-tagging | MEDIUM — filled |
 
 ### 2.3 Architecture verdict
 

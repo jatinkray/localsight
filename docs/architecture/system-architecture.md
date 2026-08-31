@@ -147,3 +147,63 @@ Timeline query (date, camera_id)
 - Worker: one process per host; multiple workers share DB/storage and process
   disjoint camera sets. GPU scheduling is a future bounded scheduler.
 - Storage: local disk → S3-compatible; DB: Postgres with partitioning on `events`.
+
+## CI/CD & supply-chain integrity
+
+Every commit goes through a 9-job GitHub Actions pipeline that enforces quality,
+security, and operational standards before merge. The pipeline is documented in
+detail in `docs/operations/ci-cd-pipeline.md`.
+
+```
+   ┌─────────────────────────────────────────────────────────────────┐
+   │                       Git Push / PR                                │
+   └─────────────────────────────┬─────────────────────────────────────┘
+                                 │
+                                 ▼
+   ┌─────────────────────────────────────────────────────────────────┐
+   │  Lint  │  Tests  │  Integration  │  CodeQL  │  Semgrep  │ Trivy │
+   │  (ruff)  (SQLite)  (PostgreSQL)    (SAST)    (SAST)     (image)│
+   └─────────────────────────────┬─────────────────────────────────────┘
+                                 │
+                                 ▼
+   ┌─────────────────────────────────────────────────────────────────┐
+   │  Dependency audit  │  Container build + push  │  Release tags  │
+   │  (pip-audit+Saf.)  │  (multi-platform)        │  (SBOM, GH)   │
+   └─────────────────────────────┬─────────────────────────────────────┘
+                                 │
+                                 ▼
+   ┌─────────────────────────────────────────────────────────────────┐
+   │                      Quality Gate                                │
+   │  Blocks merge on lint/test failures; security findings are       │
+   │  warnings tracked in the Security tab                            │
+   └─────────────────────────────────────────────────────────────────┘
+```
+
+### Free CVE / vulnerability sources checked
+
+| Source | Database | Job | Coverage |
+|--------|----------|-----|----------|
+| pip-audit | OSV / PyPI | `security-deps` | Python package CVEs |
+| Safety | pyup.io | `security-deps` | Python package CVEs |
+| Trivy | GHSA / TSL / NVD | `container-scan` | OS + Python CVEs in images |
+| CodeQL | GitHub code scanning | `sast-codeql` | Python SAST |
+| Semgrep | Semgrep registry | `sast-semgrep` | OWASP / secrets / Python |
+| Dependabot | Combined | Scheduled PRs | Auto-update deps weekly |
+
+### Container supply chain
+
+- **Multi-platform build**: `linux/amd64` (servers) and `linux/arm64` (Jetson, RPi)
+- **SBOM**: SPDX-JSON generated per release via Trivy
+- **Provenance**: SLSA-style attestation from `docker/build-push-action@v6`
+- **GHCR**: `ghcr.io/jatinkray/localsight` with auto-tags
+
+### Branch protection recommendations
+
+Enable these required status checks on `main`:
+- `lint`
+- `Unit Tests (Python 3.12, SQLite)`
+- `Integration Tests (PostgreSQL)`
+- `Quality Gate`
+
+Security jobs (`CodeQL`, `Semgrep`, `Trivy`) are warnings only; they populate
+the Security tab without blocking the merge.

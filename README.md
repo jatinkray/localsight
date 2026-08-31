@@ -71,9 +71,31 @@ as background services.
 ## Tests
 
 ```bash
-pip install pytest
+pip install -r requirements.txt
+pip install pytest pytest-cov httpx numpy
+rm -f test_localvision.db
 pytest -q                       # 66 tests: auth, RBAC, SSRF, encryption, analytics, pipeline, API, live, alerts, ONNX detector
 ```
+
+Coverage report: `pytest --cov=packages --cov=apps --cov-fail-under=50` (currently 74%).
+
+## CI/CD
+
+Every push to `main` and every PR runs a 9-job GitHub Actions pipeline:
+
+- **lint** — ruff + mypy
+- **unit tests** — pytest against SQLite (66 tests, ~17s)
+- **integration** — pytest against PostgreSQL + pgvector
+- **dependency audit** — pip-audit (OSV/PyPI) + Safety (pyup.io)
+- **CodeQL SAST** — GitHub code scanning for Python
+- **Semgrep SAST** — community + OWASP + secrets rules
+- **container scan** — Trivy SARIF, CRITICAL/HIGH CVE check
+- **docker build** — multi-platform (amd64/arm64) push to GHCR
+- **quality gate** — blocks merge on lint/test failures
+
+All security tools are free tier. SBOM (SPDX) is generated per release.
+See `docs/operations/ci-cd-pipeline.md` for the full pipeline reference and
+`CONTRIBUTING.md` for branch/commit/PR conventions.
 
 ## Capacity planning
 
