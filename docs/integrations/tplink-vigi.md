@@ -86,3 +86,31 @@ curl -s -X POST http://localhost:8000/api/cameras \
 - **Tapo stream limits**: a camera can't do cloud + microSD + NVR simultaneously;
   remove the microSD to keep NVR/RTSP recording.
 - **No permanent public exposure** — LocalVision issues signed, expiring media URLs.
+
+## Beyond TP-Link — ONVIF & multi-vendor
+
+LocalVision is not limited to TP-Link. Any RTSP/ONVIF camera works:
+
+- **ONVIF discovery** — `POST /api/cameras/onvif/discover` finds devices on the LAN
+  (WS-Discovery). `POST /api/cameras/onvif/streams` returns RTSP URIs for a device
+  profile. Both are SSRF-validated and audited.
+- **Vendor presets** — `GET /api/cameras/presets` lists URL templates for
+  `axis`, `hanwha`, `hikvision` (ISAPI), `dahua` (CGI), `reolink`, `bosch`, `onvif`,
+  and `gbt28181`. `POST /api/cameras/presets/build` constructs a `rtsp://` URL for a
+  vendor (credentials are never echoed back in the response — they are encrypted at
+  rest when the camera is created).
+
+```bash
+# List vendor presets
+curl -s http://localhost:8000/api/cameras/presets -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+
+# Discover ONVIF devices
+curl -s -X POST http://localhost:8000/api/cameras/onvif/discover -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"timeout":2.0}'
+
+# Fetch streams for one device (xaddr must be on the SSRF allowlist)
+curl -s -X POST http://localhost:8000/api/cameras/onvif/streams -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"xaddr":"http://192.168.1.5/onvif"}'
+```
+
+For non-TP-Link cameras, add them via `POST /api/cameras` with the `stream_url` /
+`substream_url` from the preset (or ONVIF discovery), exactly as shown above for a
+single VIGI camera.
