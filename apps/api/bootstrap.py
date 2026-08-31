@@ -96,6 +96,7 @@ def _ensure_columns(rt: Runtime) -> None:
 
     added = [
         "ALTER TABLE cameras ADD COLUMN rules JSON",
+        "ALTER TABLE alert_routes ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0",
     ]
     with rt.engine.begin() as conn:
         for stmt in added:

@@ -399,6 +399,66 @@ def test_mqtt_notifier_topics_render_and_collapse():
     assert seen[-1] == "localsight/unknown/alerts"
 
 
+# ── alert cooldown (Task 6) ──────────────────────────────────────────────────
+def test_cooldown_tracker():
+    from apps.worker.main import CooldownTracker
+    t = {"now": 1000.0}
+    ct = CooldownTracker(now=lambda: t["now"])
+    k = ("webhook", "intrusion", "cam-1")
+    assert ct.is_in_cooldown(k, 60) is False
+    ct.record(k)
+    assert ct.is_in_cooldown(k, 60) is True
+    t["now"] = 1059.0
+    assert ct.is_in_cooldown(k, 60) is True
+    t["now"] = 1060.0
+    assert ct.is_in_cooldown(k, 60) is False
+    assert ct.is_in_cooldown(k, 0) is False
+    assert ct.is_in_cooldown(("mqtt", "intrusion", "cam-1"), 60) is False
+
+
+def test_worker_alert_cooldown(client):
+    from apps.worker import main as worker_main
+    h = {"Authorization": _admin(client)}
+    mqtt_cfg = {"host": "127.0.0.1", "port": 1883, "topic": "l/{camera_id}"}
+    r = client.post("/api/alerts/routes", json={
+        "rule_type": "intrusion", "channel": "mqtt", "config": mqtt_cfg,
+        "cooldown_sec": 300,
+    }, headers=h)
+    assert r.status_code == 200, r.text
+
+    rt = client.app.state.runtime
+    saved_cooldown_last = dict(worker_main._cooldown._last)
+    saved_cache_obj = worker_main._route_cache
+    worker_main._cooldown._last.clear()
+    worker_main._route_cache = {"at": 0.0, "routes": []}
+    try:
+        alert = Alert(rule_id="r", rule_type="intrusion", camera_id="cam-1",
+                      severity="warning", title="t", message="m")
+        n1 = worker_main._build_notifiers(rt, alert)
+        assert sum(1 for n in n1 if getattr(n, "channel", None) == "mqtt") == 1
+        n2 = worker_main._build_notifiers(rt, alert)
+        assert sum(1 for n in n2 if getattr(n, "channel", None) == "mqtt") == 0
+    finally:
+        worker_main._cooldown._last.clear()
+        worker_main._cooldown._last.update(saved_cooldown_last)
+        worker_main._route_cache = saved_cache_obj
+
+
+def test_alert_route_cooldown_field(client):
+    h = {"Authorization": _admin(client)}
+    cfg = {"host": "127.0.0.1", "port": 1883, "topic": "l"}
+    r = client.post("/api/alerts/routes", json={
+        "rule_type": "line_cross", "channel": "mqtt", "config": cfg,
+        "cooldown_sec": 120,
+    }, headers=h)
+    assert r.status_code == 200
+    rid = r.json()["id"]
+    listing = client.get("/api/alerts/routes", headers=h).json()
+    item = next(i for i in listing if i["id"] == rid)
+    assert item["cooldown_sec"] == 120
+    assert client.delete(f"/api/alerts/routes/{rid}", headers=h).status_code == 200
+
+
 # ── push notifier (ntfy) ─────────────────────────────────────────────────────
 def test_push_notifier_ntfy():
     captured = {}
