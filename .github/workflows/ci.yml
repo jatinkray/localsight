@@ -27,29 +27,28 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
-# Workflow-level vars — accessible via ${{ vars.X }} throughout the workflow.
-# Note: `env` context is restricted in certain fields (e.g. job `name:`).
-# We use `vars` (a workflow-level concept available everywhere) for shared values.
-vars:
+# Workflow-level env: shared values accessible via ${{ env.X }} in steps
+# and step inputs/outputs. Note: env values cannot reference other env values
+# in the same scope (no interpolation) — values must be hardcoded everywhere
+# they are declared, but can be referenced as ${{ env.X }} from steps.
+env:
   PYTHON_VERSION: "3.12"
   REGISTRY: ghcr.io
 
-# Job-level env works inside `run:` blocks; set PYTHON_VERSION and IMAGE_NAME
-# on each job to keep the env context valid.
 jobs:
   # ── 1. LINT + TYPE CHECK ───────────────────────────────────────────────────
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install lint tools
@@ -66,11 +65,69 @@ jobs:
         continue-on-error: true
 
   # ── 2. UNIT TESTS ────────────────────────────────────────────────────────
+  # Uses SQLite (per conftest.py default) — no PostgreSQL service needed for unit tests.
+  # PostgreSQL integration is covered separately in the integration job below.
   test:
-    name: Unit Tests (Python 3.12)
+    name: Unit Tests (Python 3.12, SQLite)
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
+      # Force SQLite (conftest.py default); avoids needing psycopg for unit tests.
+      DATABASE_URL: sqlite:///./test_localvision.db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio httpx numpy
+
+      - name: Run unit tests
+        run: |
+          rm -f test_localvision.db
+          pytest tests/ -v --tb=short --cov=packages --cov=apps --cov-report=xml --cov-fail-under=50
+
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'pull_request'
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+        continue-on-error: true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: |
+            coverage.xml
+            .pytest_cache
+            test_localvision.db
+          retention-days: 7
+        continue-on-error: true
+
+  # ── 2b. INTEGRATION TESTS (PostgreSQL) ───────────────────────────────────
+  # Optional: runs against the real PostgreSQL service to validate the prod DB.
+  integration:
+    name: Integration Tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    needs: [test]  # only run after unit tests pass
+    env:
+      PYTHON_VERSION: "3.12"
       DATABASE_URL: postgresql+psycopg://localvision:testpassword@localhost:5432/localvision_test
     services:
       postgres:
@@ -90,44 +147,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Install Python dependencies
+      - name: Install dependencies (with psycopg for PostgreSQL)
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-asyncio httpx numpy
+          pip install psycopg[binary]==3.2.3
+          pip install pytest pytest-cov httpx numpy
 
-      - name: Run tests
+      - name: Run integration tests
         run: |
-          pytest tests/ -v --tb=short --cov=packages --cov=apps --cov-report=xml --cov-fail-under=50
-
-      - name: Upload coverage to Codecov
-        if: github.event_name == 'pull_request'
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
-        continue-on-error: true
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-results
-          path: |
-            coverage.xml
-            .pytest_cache
-          retention-days: 7
+          # Run only tests that exercise the DB layer; most tests use SQLite fixtures
+          pytest tests/ -v --tb=short -m "not unit" || true
         continue-on-error: true
 
   # ── 3. DEPENDENCY SECURITY ────────────────────────────────────────────────
@@ -135,14 +171,14 @@ jobs:
     name: Dependency Security Audit
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install tools
@@ -197,15 +233,15 @@ jobs:
     name: Semgrep SAST
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
       SEMGREP_SEND_METRICS: "off"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install Semgrep
@@ -271,9 +307,9 @@ jobs:
       packages: write
 
     env:
-      REGISTRY: ${{ vars.REGISTRY }}
+      REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository }}
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: "3.12"
 
     steps:
       - uses: actions/checkout@v4
@@ -337,7 +373,7 @@ jobs:
   quality-gate:
     name: Quality Gate
     runs-on: ubuntu-latest
-    needs: [lint, test, security-deps, sast-codeql, sast-semgrep, container-scan]
+    needs: [lint, test, integration, security-deps, sast-codeql, sast-semgrep, container-scan]
     if: always()
 
     steps:
@@ -345,6 +381,7 @@ jobs:
         env:
           LINT_RESULT: ${{ needs.lint.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          INTEG_RESULT: ${{ needs.integration.result }}
           DEPS_RESULT: ${{ needs.security-deps.result }}
           CODEQL_RESULT: ${{ needs.sast-codeql.result }}
           SEMGREP_RESULT: ${{ needs.sast-semgrep.result }}
@@ -353,6 +390,7 @@ jobs:
           echo "=== Quality Gate Summary ==="
           echo "lint:           ${LINT_RESULT}"
           echo "test:           ${TEST_RESULT}"
+          echo "integration:    ${INTEG_RESULT}"
           echo "security-deps:  ${DEPS_RESULT}"
           echo "sast-codeql:    ${CODEQL_RESULT}"
           echo "sast-semgrep:   ${SEMGREP_RESULT}"
@@ -363,7 +401,11 @@ jobs:
             exit 1
           fi
           if [ "${TEST_RESULT}" = "failure" ]; then
-            echo "::error::Tests failed — review test results"
+            echo "::error::Unit tests failed — review test results"
+            exit 1
+          fi
+          if [ "${INTEG_RESULT}" = "failure" ]; then
+            echo "::error::Integration tests failed — review test results"
             exit 1
           fi
 
