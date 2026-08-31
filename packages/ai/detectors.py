@@ -163,7 +163,13 @@ class ONNXDetector(_RuntimeDetector):
             import onnxruntime as ort
         except Exception as exc:
             raise RuntimeError("onnxruntime is not installed (pip install onnxruntime)") from exc
-        self._session = ort.InferenceSession(self.model_path, providers=("CPUExecutionProvider",))
+        # Prefer GPU when available, fall back to CPU. onnxruntime selects the first
+        # available provider, so listing CUDA before CPU lets the detector use the
+        # GPU on capable hosts without changing code.
+        self._session = ort.InferenceSession(
+            self.model_path,
+            providers=("CUDAExecutionProvider", "CPUExecutionProvider"),
+        )
         self._input_name = self._session.get_inputs()[0].name
 
     def _infer(self, img):

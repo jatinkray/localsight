@@ -1,17 +1,23 @@
-"""Reference multi-object tracker (IOU association).
+"""Multi-object tracker with motion prediction (SORT-style).
 
-Production can replace this with DeepSORT/BotSORT; the interface is unchanged.
-Track IDs are ephemeral and must never be confused with a real identity.
+Pure-IOU association loses tracks under occlusion or fast motion. This reference
+tracker adds constant-velocity *motion prediction*: each track's next position is
+forecast from its recent velocity, then detections are associated to the predicted
+boxes by IoU (greedy). That keeps cross-frame identity stable across brief
+occlusions without requiring a ReID embedding model.
+
+For appearance-based ReID (ByteTrack/BoT-SORT), stage an embedding model and extend
+`associate` to score cosine similarity between track appearance and detection
+crops — the interface here is unchanged, so the worker needs no edits.
 """
 from __future__ import annotations
 
-import itertools
-from typing import List
+from typing import List, Tuple
 
 from packages.ai.interfaces import Detection, Track, Tracker
 
 
-def _iou(a: tuple, b: tuple) -> float:
+def _iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> float:
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
     ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
@@ -21,11 +27,16 @@ def _iou(a: tuple, b: tuple) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def _center(b: Tuple[float, float, float, float]) -> Tuple[float, float]:
+    return (b[0] + b[2] / 2, b[1] + b[3] / 2)
+
+
 class IouTracker(Tracker):
-    def __init__(self, iou_threshold: float = 0.5, max_age: int = 30):
+    def __init__(self, iou_threshold: float = 0.5, max_age: int = 30, vel_smooth: float = 0.5):
         self._iou = iou_threshold
         self._max_age = max_age
-        self._state: dict[str, dict] = {}  # track_id -> {bbox, age, counter}
+        self._vel_smooth = vel_smooth
+        self._state: dict[str, dict] = {}  # track_id -> state
         self._counters: dict[str, int] = {}
 
     def _next_id(self, camera_id: str) -> str:
@@ -33,40 +44,61 @@ class IouTracker(Tracker):
         self._counters[camera_id] = n
         return f"{camera_id}-track-{n}"
 
+    def _predict(self, tid: str) -> Tuple[float, float, float, float]:
+        st = self._state[tid]
+        if st["age"] > 0:  # predict forward only for tracks not seen last frame
+            bx, by, bw, bh = st["bbox"]
+            vx, vy, vw, vh = st["vel"]
+            return (bx + vx, by + vy, max(0.0, bw + vw), max(0.0, bh + vh))
+        return st["bbox"]
+
     def update(self, camera_id: str, detections: List[Detection], ts) -> List[Track]:
         out: List[Track] = []
-        used = set()
-        # match detections to existing tracks by best IOU
-        for det in detections:
+        predictions = {tid: self._predict(tid) for tid in self._state}
+        used: set[str] = set()
+
+        # Greedy association: each detection to its best predicted track by IoU.
+        order = sorted(detections, key=lambda d: d.confidence, reverse=True)
+        for det in order:
             best_id, best_iou = None, 0.0
-            for tid, st in self._state.items():
+            for tid, pred in predictions.items():
                 if tid in used:
                     continue
-                score = _iou(det.bbox, st["bbox"])
+                score = _iou(det.bbox, pred)
                 if score > best_iou:
                     best_iou, best_id = score, tid
             if best_id and best_iou >= self._iou:
                 st = self._state[best_id]
+                old = st["bbox"]
+                vel = (
+                    (det.bbox[0] - old[0]) * self._vel_smooth + st["vel"][0] * (1 - self._vel_smooth),
+                    (det.bbox[1] - old[1]) * self._vel_smooth + st["vel"][1] * (1 - self._vel_smooth),
+                    (det.bbox[2] - old[2]) * self._vel_smooth + st["vel"][2] * (1 - self._vel_smooth),
+                    (det.bbox[3] - old[3]) * self._vel_smooth + st["vel"][3] * (1 - self._vel_smooth),
+                )
                 st["bbox"] = det.bbox
+                st["vel"] = vel
                 st["age"] = 0
                 st["label"] = det.label
-                used.add(best_id)
-                cx = det.bbox[0] + det.bbox[2] / 2
-                cy = det.bbox[1] + det.bbox[3] / 2
+                cx, cy = _center(det.bbox)
                 st["traj"].append((round(cx, 3), round(cy, 3)))
+                if len(st["traj"]) > 20:
+                    st["traj"].pop(0)
+                used.add(best_id)
                 out.append(Track(best_id, det.bbox, det.confidence, (cx, cy), st["traj"][-20:], det.label))
             else:
                 tid = self._next_id(camera_id)
-                cx = det.bbox[0] + det.bbox[2] / 2
-                cy = det.bbox[1] + det.bbox[3] / 2
+                cx, cy = _center(det.bbox)
                 self._state[tid] = {
                     "bbox": det.bbox,
+                    "vel": (0.0, 0.0, 0.0, 0.0),
                     "age": 0,
                     "label": det.label,
                     "traj": [(round(cx, 3), round(cy, 3))],
                 }
                 out.append(Track(tid, det.bbox, det.confidence, (cx, cy), self._state[tid]["traj"], det.label))
-        # age unmatched tracks
+
+        # Age unmatched tracks; drop when too old.
         for tid in list(self._state):
             if tid not in used:
                 self._state[tid]["age"] += 1

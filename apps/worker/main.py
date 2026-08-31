@@ -12,9 +12,12 @@ out to the configured alert channels.
 from __future__ import annotations
 
 import os
+import queue
 import threading
 import time
 from typing import List, Optional
+
+import datetime as dt
 
 from packages.ai.anpr import ANPRPipeline, ReferencePlateDetector, ReferencePlateOCR
 from packages.ai.detectors import build_detector
@@ -24,7 +27,7 @@ from packages.ai.matcher import VectorMatcher
 from packages.ai.pipeline import CameraPipeline
 from packages.ai.rules import rule_engine_from_json
 from packages.ai.tracker import IouTracker
-from packages.domain.models import AlertRoute, Camera, VideoSegment
+from packages.domain.models import AlertRoute, Camera, Event, Snapshot, VideoSegment
 from packages.notify import Alert, PushNotifier, WebhookNotifier, build_notifier, dispatch
 from packages.observability.logging import configure_logging, logging
 from packages.security.errors import UnsafeUrlError
@@ -89,6 +92,55 @@ def _build_notifiers(rt, alert: Alert) -> List:
             except Exception as exc:  # noqa: BLE001 - bad channel config
                 log.warning("skipping email route: %s", exc)
     return notifiers
+
+
+_alert_queue: "queue.Queue" = queue.Queue()
+
+
+def _alert_sender(rt, stop: threading.Event) -> None:
+    """Drain the alert queue and fan out off the hot frame-processing path."""
+    while not stop.is_set():
+        try:
+            alert = _alert_queue.get(timeout=1.0)
+        except queue.Empty:
+            continue
+        try:
+            dispatch(alert, _build_notifiers(rt, alert))
+        except Exception:  # noqa: BLE001 - alerting must never crash the sender
+            log.exception("alert dispatch failed")
+
+
+def _retention_loop(rt, stop: threading.Event) -> None:
+    while not stop.is_set():
+        try:
+            _sweep_retention(rt)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("retention sweep failed: %s", exc)
+        stop.wait(3600)
+
+
+def _sweep_retention(rt) -> None:
+    """Delete expired recordings/events/snapshots per the configured policies."""
+    settings = rt.settings
+    now = dt.datetime.now(dt.timezone.utc)
+    with rt.SessionLocal() as s:
+        rec_cut = now - dt.timedelta(days=settings.retention_recordings_days)
+        for seg in s.query(VideoSegment).filter(VideoSegment.end_ts < rec_cut).all():
+            try:
+                rt.storage.delete(seg.storage_key)
+            except Exception:  # noqa: BLE001
+                pass
+            s.delete(seg)
+        ev_cut = now - dt.timedelta(days=settings.retention_events_days)
+        s.query(Event).filter(Event.timestamp_end < ev_cut).delete()
+        snap_cut = now - dt.timedelta(days=settings.retention_snapshots_days)
+        for snap in s.query(Snapshot).filter(Snapshot.created_at < snap_cut).all():
+            try:
+                rt.storage.delete(rt.crypto.decrypt_str(snap.storage_key_enc))
+            except Exception:  # noqa: BLE001
+                pass
+            s.delete(snap)
+        s.commit()
 
 
 def make_detector(settings: Settings, registry) -> Detector:
@@ -194,9 +246,9 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
                               camera_id=ae.camera_id, title=ae.event_type, message=str(ae.detail),
                               detail=ae.detail, ts=ae.timestamp_start.isoformat() if ae.timestamp_start else None)
                 try:
-                    dispatch(alert, _build_notifiers(rt, alert))
+                    _alert_queue.put(alert)
                 except Exception:  # noqa: BLE001 - alerting must never crash the loop
-                    log.exception("alert dispatch failed for %s", camera.id)
+                    log.exception("alert enqueue failed for %s", camera.id)
         except Exception:  # noqa: BLE001 - one bad frame must not kill the camera loop
             session.rollback()
             log.exception("pipeline error for camera %s", camera.id)
@@ -225,6 +277,11 @@ def main() -> None:
         t.start()
         threads.append(t)
     log.info("worker running for %d camera(s). Ctrl-C to stop.", len(threads))
+    # Background services: async alert fan-out + retention sweeper.
+    sender = threading.Thread(target=_alert_sender, args=(rt, stop), daemon=True)
+    sender.start()
+    reaper = threading.Thread(target=_retention_loop, args=(rt, stop), daemon=True)
+    reaper.start()
     try:
         while True:
             time.sleep(1)
@@ -232,6 +289,8 @@ def main() -> None:
         stop.set()
         for t in threads:
             t.join(timeout=5)
+        sender.join(timeout=5)
+        reaper.join(timeout=5)
 
 
 if __name__ == "__main__":

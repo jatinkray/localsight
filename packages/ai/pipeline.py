@@ -27,15 +27,7 @@ from packages.ai.interfaces import (
     IdentityMatcher,
     Track,
 )
-from packages.ai.rules import (
-    EVENT_CROWD,
-    EVENT_INTRUSION,
-    EVENT_LINE_CROSS,
-    EVENT_LOITERING,
-    EVENT_OBJECT_LEFT,
-    EVENT_OBJECT_REMOVED,
-    RuleEngine,
-)
+from packages.ai.rules import RuleEngine
 from packages.ai.anpr import ANPRPipeline
 from packages.domain.events import classify_identity
 from packages.domain.models import (
@@ -49,6 +41,30 @@ from packages.security.crypto import CryptoBox
 from packages.storage.base import StorageProvider
 
 _ENROLLED_TTL = 30.0  # seconds before re-reading enrolled embeddings
+
+# Max ANPR read frequency per vehicle track. Per-frame OCR on every vehicle is
+# unbounded CPU + floods the event/alert store; we re-read at most this often and
+# only emit an event when the plate changes (new vehicle / new reading).
+_ANPR_INTERVAL_SEC = 5.0
+
+
+def _crop_vehicle(frame, bbox: Tuple[float, float, float, float]):
+    """Best-effort crop of a normalized bbox from a numpy frame; pass-through otherwise."""
+    try:
+        import numpy as np
+    except Exception:
+        return frame
+    if not isinstance(frame, np.ndarray):
+        return frame
+    h, w = frame.shape[:2]
+    x, y, bw, bh = bbox
+    x1 = max(0, int(x * w))
+    y1 = max(0, int(y * h))
+    x2 = min(w, int((x + bw) * w))
+    y2 = min(h, int((y + bh) * h))
+    if x2 <= x1 or y2 <= y1:
+        return frame
+    return frame[y1:y2, x1:x2]
 
 
 class _TrackState:
@@ -101,6 +117,7 @@ class CameraPipeline:
         self.recognition_enabled = bool(identity_recognition_enabled and face_chain and matcher)
         self.rule_engine = rule_engine
         self.anpr = anpr
+        self._anpr_last: dict[str, Tuple[Optional[str], dt.datetime]] = {}
         self._last_analytic: list[EventRow] = []  # point-in-time events (rules/anpr) for alerting
 
         self._active: dict[str, _TrackState] = {}
@@ -149,23 +166,34 @@ class CameraPipeline:
                 self._last_analytic.append(ev)
         if self.anpr is not None:
             for tr in tracks:
-                if tr.label == "vehicle":
-                    reading = self.anpr.read(frame, ts)
-                    if reading:
-                        ev = EventRow(
-                            camera_id=self.camera_id, track_id=tr.track_id,
-                            identity_status="unknown", event_type="anpr",
-                            timestamp_start=ts, timestamp_end=ts, confidence=reading.confidence,
-                            bbox={"x": tr.bbox[0], "y": tr.bbox[1], "w": tr.bbox[2], "h": tr.bbox[3]},
-                            detail={
-                                "plate_enc": self.crypto.encrypt_str(reading.plate),
-                                "plate_hash": hashlib.sha256(
-                                    reading.plate.encode("utf-8")
-                                ).hexdigest()[:16],
-                            },
-                        )
-                        session.add(ev)
-                        self._last_analytic.append(ev)
+                if tr.label != "vehicle":
+                    continue
+                last_plate, last_ts = self._anpr_last.get(tr.track_id, (None, None))
+                if last_ts is not None and (ts - last_ts).total_seconds() < _ANPR_INTERVAL_SEC:
+                    continue  # throttle: re-read at most every _ANPR_INTERVAL_SEC per track
+                crop = _crop_vehicle(frame, tr.bbox)
+                reading = self.anpr.read(crop, ts)
+                if not reading:
+                    continue
+                # Only emit an event on a *new* plate for this track (dedup flooding).
+                if last_plate == reading.plate:
+                    self._anpr_last[tr.track_id] = (reading.plate, ts)
+                    continue
+                self._anpr_last[tr.track_id] = (reading.plate, ts)
+                ev = EventRow(
+                    camera_id=self.camera_id, track_id=tr.track_id,
+                    identity_status="unknown", event_type="anpr",
+                    timestamp_start=ts, timestamp_end=ts, confidence=reading.confidence,
+                    bbox={"x": tr.bbox[0], "y": tr.bbox[1], "w": tr.bbox[2], "h": tr.bbox[3]},
+                    detail={
+                        "plate_enc": self.crypto.encrypt_str(reading.plate),
+                        "plate_hash": hashlib.sha256(
+                            reading.plate.encode("utf-8")
+                        ).hexdigest()[:16],
+                    },
+                )
+                session.add(ev)
+                self._last_analytic.append(ev)
 
         for tr in tracks:
             st = self._active.get(tr.track_id)

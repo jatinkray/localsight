@@ -30,18 +30,34 @@ def people_counting(session: Session, camera_id: str, start: dt.datetime, end: d
 
 def occupancy_trend(session: Session, camera_id: str, start: dt.datetime, end: dt.datetime,
                     bucket_min: int = 60) -> List[Tuple[dt.datetime, int]]:
-    """Occupancy (distinct active tracks) per time bucket."""
-    buckets: List[Tuple[dt.datetime, int]] = []
-    step = dt.timedelta(minutes=bucket_min)
-    cur = start
-    while cur < end:
-        nxt = cur + step
-        q = select(func.count(func.distinct(Track.id))).where(
+    """Occupancy (distinct active tracks) per time bucket.
+
+    Fetches the window's tracks in a *single* query, then buckets in Python, so a
+    wide range (e.g. a year at 60-min buckets) does not fan out into thousands of
+    sequential SQL queries. Comparison is done in naive space so it works whether
+    the backend returns tz-aware (PostgreSQL) or naive (SQLite) timestamps.
+    """
+    def _naive(d):
+        return d.replace(tzinfo=None) if d.tzinfo else d
+
+    start_n, end_n = _naive(start), _naive(end)
+    rows = session.execute(
+        select(Track.id, Track.first_seen, Track.last_seen).where(
             Track.camera_id == camera_id,
-            Track.last_seen >= cur,
-            Track.first_seen < nxt,
+            Track.last_seen >= start,
+            Track.first_seen <= end,
         )
-        buckets.append((cur, int(session.scalar(q) or 0)))
+    ).all()
+    rows_n = [
+        (_naive(fs), _naive(ls)) for (_, fs, ls) in rows
+    ]
+    step = dt.timedelta(minutes=bucket_min)
+    buckets: List[Tuple[dt.datetime, int]] = []
+    cur = start_n
+    while cur < end_n:
+        nxt = cur + step
+        n = sum(1 for (fs, ls) in rows_n if ls >= cur and fs < nxt)
+        buckets.append((cur, n))
         cur = nxt
     return buckets
 
@@ -82,10 +98,13 @@ def heatmap_grid(session: Session, camera_id: str, start: dt.datetime, end: dt.d
     """
     rows, cols = grid
     matrix = [[0] * cols for _ in range(rows)]
+    # Cap the number of tracks scanned so an unbounded history cannot exhaust memory;
+    # footfall heatmaps are robust to sampling.
     tracks = session.execute(
         select(Track.trajectory).where(
             Track.camera_id == camera_id,
             Track.last_seen >= start, Track.first_seen <= end)
+        .limit(20000)
     ).all()
     for (traj,) in tracks:
         if not traj:

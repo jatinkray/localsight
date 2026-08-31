@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     storage_s3_region: str = "us-east-1"
     storage_s3_prefix: str = "localvision"
 
+    # Detector backend. "reference" is a CPU motion proxy that only emits the
+    # "person" class and is intended for bootstrapping without staged weights.
+    # Multi-class detection (vehicle/animal/bag/...) requires a staged ONNX/TensorRT/
+    # OpenVINO/TFLite model via the registry — set ai_detector accordingly.
     ai_detector: str = "reference"  # reference | onnx | tensorrt | openvino | tflite
     ai_inference_fps: int = 5
     ai_confidence_threshold: float = 0.45
