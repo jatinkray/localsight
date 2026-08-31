@@ -27,29 +27,28 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
-# Workflow-level vars — accessible via ${{ vars.X }} throughout the workflow.
-# Note: `env` context is restricted in certain fields (e.g. job `name:`).
-# We use `vars` (a workflow-level concept available everywhere) for shared values.
-vars:
+# Workflow-level env: accessible via ${{ env.X }} in jobs, steps, and `with:` blocks.
+# Note: `env` context is restricted in job `name:` fields (line 67 originally failed
+# there) — we hardcode the Python version in names and use ${{ env.PYTHON_VERSION }}
+# in step `with:` blocks and `run:` scripts.
+env:
   PYTHON_VERSION: "3.12"
   REGISTRY: ghcr.io
 
-# Job-level env works inside `run:` blocks; set PYTHON_VERSION and IMAGE_NAME
-# on each job to keep the env context valid.
 jobs:
   # ── 1. LINT + TYPE CHECK ───────────────────────────────────────────────────
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install lint tools
@@ -70,7 +69,7 @@ jobs:
     name: Unit Tests (Python 3.12)
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
       DATABASE_URL: postgresql+psycopg://localvision:testpassword@localhost:5432/localvision_test
     services:
       postgres:
@@ -90,10 +89,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install system dependencies
@@ -135,14 +134,14 @@ jobs:
     name: Dependency Security Audit
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install tools
@@ -197,15 +196,15 @@ jobs:
     name: Semgrep SAST
     runs-on: ubuntu-latest
     env:
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
       SEMGREP_SEND_METRICS: "off"
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ vars.PYTHON_VERSION }}
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ vars.PYTHON_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install Semgrep
@@ -273,7 +272,7 @@ jobs:
     env:
       REGISTRY: ${{ vars.REGISTRY }}
       IMAGE_NAME: ${{ github.repository }}
-      PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+      PYTHON_VERSION: ${{ env.PYTHON_VERSION }}
 
     steps:
       - uses: actions/checkout@v4
