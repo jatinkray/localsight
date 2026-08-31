@@ -116,9 +116,14 @@ class OnvifDiscover(BaseModel):
 
 
 @router.post("/onvif/discover", dependencies=[Depends(require_permission("camera:configure"))])
-def onvif_discover(body: OnvifDiscover):
+def onvif_discover(body: OnvifDiscover, request: Request, db: Session = Depends(get_db),
+                   rt: Runtime = Depends(get_runtime)):
     """WS-Discovery for ONVIF devices on the LAN. Returns device XAddrs."""
-    return {"xaddrs": OnvifClient.discover(timeout=body.timeout)}
+    xaddrs = OnvifClient.discover(timeout=body.timeout)
+    write_audit(db, user=request.state.user, action="onvif.discover", resource="lan",
+                request_id=getattr(request.state, "request_id", "-"),
+                detail={"count": len(xaddrs)})
+    return {"xaddrs": xaddrs}
 
 
 class OnvifStreams(BaseModel):
@@ -128,7 +133,8 @@ class OnvifStreams(BaseModel):
 
 
 @router.post("/onvif/streams", dependencies=[Depends(require_permission("camera:configure"))])
-def onvif_streams(body: OnvifStreams, rt: Runtime = Depends(get_runtime)):
+def onvif_streams(body: OnvifStreams, request: Request, db: Session = Depends(get_db),
+                   rt: Runtime = Depends(get_runtime)):
     """Fetch RTSP stream URIs for an ONVIF device's profiles.
 
     The operator-supplied `xaddr` is egress-validated before any outbound call.
@@ -138,7 +144,11 @@ def onvif_streams(body: OnvifStreams, rt: Runtime = Depends(get_runtime)):
     except UnsafeUrlError as exc:
         raise HTTPException(status_code=400, detail=f"unsafe ONVIF address: {exc}")
     client = OnvifClient(body.xaddr, user=body.user, password=body.password)
-    return {"xaddr": body.xaddr, "stream_uris": client.stream_uris()}
+    uris = client.stream_uris()
+    write_audit(db, user=request.state.user, action="onvif.streams", resource=body.xaddr,
+                request_id=getattr(request.state, "request_id", "-"),
+                detail={"count": len(uris)})
+    return {"xaddr": body.xaddr, "stream_uris": uris}
 
 
 @router.post("/cameras/from-nvr", dependencies=[Depends(require_permission("camera:configure"))])

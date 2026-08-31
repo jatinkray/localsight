@@ -17,7 +17,7 @@ from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from packages.domain.models import AlertRoute, Event, User
-from packages.notify import Alert, WebhookNotifier, dispatch
+from packages.notify import Alert, WebhookNotifier
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
 

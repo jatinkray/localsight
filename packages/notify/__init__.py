@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
+from collections import deque
+
 
 @dataclass
 class Alert:
@@ -91,7 +93,10 @@ class PushNotifier(Notifier):
 
     def __init__(self, handler: Callable[[Alert], None] | None = None) -> None:
         self._handler = handler
-        self.sent: List[Alert] = []
+        # Bounded buffer: the long-running worker is a single process, so an
+        # unbounded list would leak memory as alerts accumulate. Keep a rolling
+        # window only.
+        self.sent: deque = deque(maxlen=500)
 
     def send(self, alert: Alert) -> None:
         self.sent.append(alert)
