@@ -1,0 +1,27 @@
+# Code owners for LocalVision
+#
+# Require at least one approval from the listed owners for each path.
+# Add your team members / review requirements here.
+#
+# Format: pattern owner1 owner2
+
+# All files require at least one approval from the security or core team
+# (use this as a default — override specific paths below)
+*       @jatinkray
+
+# Security-sensitive files require admin review
+apps/api/routers/auth.py       @jatinkray
+packages/security/            @jatinkray
+apps/api/bootstrap.py         @jatinkray
+
+# CI/CD changes require at least one CI/CD admin
+.github/workflows/           @jatinkray
+
+# Infrastructure changes require DevOps review
+infrastructure/              @jatinkray
+
+# Documentation can be merged by anyone
+docs/**                      @jatinkray
+
+# Core AI package changes require AI team review
+packages/ai/                 @jatinkray

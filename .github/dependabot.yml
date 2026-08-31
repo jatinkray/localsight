@@ -1,0 +1,78 @@
+# Dependabot configuration for LocalVision
+#
+# Automatically open PRs when:
+#   - Python packages in requirements.txt have new versions
+#   - Docker base images need updating
+#   - GitHub Actions need updating
+#
+# Security updates (security: true) open PRs immediately for critical vulns.
+# All updates use semantic versioning; lock files regenerated automatically.
+
+version: 2
+updates:
+
+  # Python package updates — weekly schedule
+  - package-ecosystem: pip
+    directory: /
+    files:
+      - requirements.txt
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: UTC
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    labels:
+      - dependencies
+      - python
+    # Group low-severity patches together to reduce noise
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - minor
+          - patch
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions updates — weekly schedule
+  - package-ecosystem: github-actions
+    directory: /
+    files:
+      - .github/workflows/ci.yml
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - dependencies
+      - ci
+
+  # Docker base image updates — monthly schedule
+  - package-ecosystem: docker
+    directory: /
+    files:
+      - infrastructure/docker/Dockerfile
+    schedule:
+      interval: monthly
+      day: "first-day-of-month"
+      time: "09:00"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "docker"
+      include: "scope"
+    labels:
+      - dependencies
+      - docker
