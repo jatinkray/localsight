@@ -83,7 +83,22 @@ def _stop_stream(camera_id: str) -> None:
         try:
             proc.terminate()
         except Exception:  # noqa: BLE001
-            pass
+                pass
+
+
+@router.get("/live/streams", dependencies=[Depends(require_permission("live:view"))])
+def live_streams():
+    """Return the currently active live transcodes (presence/health).
+
+    Each entry reports whether the ffmpeg process is still running and its PID,
+    so the dashboard can render live indicators and detect dead streams. Dead
+    (exited) processes are filtered out.
+    """
+    active = []
+    for camera_id, proc in _live_streams.items():
+        if proc.poll() is None:
+            active.append({"camera_id": camera_id, "running": True, "pid": proc.pid})
+    return {"active": active, "count": len(active)}
 
 
 class TicketRequest(BaseModel):

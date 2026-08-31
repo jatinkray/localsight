@@ -473,6 +473,84 @@ def test_event_clip_export(client):
         assert audit_rows[0].detail == {"camera_id": cam_id, "segment_count": 2}
 
 
+# ── timeline merge (events + recording) + live health (Task 3) ───────────────
+def test_timeline_merged(client):
+    h = {"Authorization": _admin(client)}
+    cam_id = client.post("/api/cameras", json={"name": "cam-tl"}, headers=h).json()["id"]
+    cam2 = client.post("/api/cameras", json={"name": "cam-tl2"}, headers=h).json()["id"]
+    rt = client.app.state.runtime
+    t0 = dt.datetime(2026, 1, 1, 12, 0, 0, tzinfo=dt.timezone.utc)
+    with rt.SessionLocal() as s:
+        s.add(Event(camera_id=cam_id, event_type="presence",
+                    timestamp_start=t0, timestamp_end=t0 + dt.timedelta(minutes=10),
+                    confidence=0.8, bbox={"x": 0, "y": 0, "w": 0.1, "h": 0.1}))
+        s.add(Event(camera_id=cam_id, event_type="line_cross",
+                    timestamp_start=t0 + dt.timedelta(minutes=5),
+                    timestamp_end=t0 + dt.timedelta(minutes=5, seconds=1),
+                    confidence=0.9, bbox={"x": 0, "y": 0, "w": 0.1, "h": 0.1}))
+        s.add(Event(camera_id=cam2, event_type="intrusion",
+                    timestamp_start=t0 + dt.timedelta(minutes=7),
+                    timestamp_end=t0 + dt.timedelta(minutes=7, seconds=1),
+                    confidence=0.95, bbox={"x": 0, "y": 0, "w": 0.1, "h": 0.1}))
+        s.add(VideoSegment(camera_id=cam_id, storage_key=f"{cam_id}/seg.mp4",
+                           start_ts=t0, end_ts=t0 + dt.timedelta(minutes=15),
+                           duration_sec=900.0, size_bytes=1024))
+        s.add(VideoSegment(camera_id=cam_id, storage_key=f"{cam_id}/seg-out.mp4",
+                           start_ts=t0 + dt.timedelta(days=30),
+                           end_ts=t0 + dt.timedelta(days=30, minutes=15),
+                           duration_sec=900.0, size_bytes=1024))
+        s.commit()
+
+    body = client.get("/api/timeline?date=2026-01-01", headers=h).json()
+    assert body["date"] == "2026-01-01"
+    assert len(body["timeline"]) == 1
+    assert body["timeline"][0]["camera_id"] == cam_id
+    assert len(body["timeline"][0]["intervals"]) == 1
+    assert {m["event_type"] for m in body["markers"]} == {"line_cross", "intrusion"}
+    assert all(m["camera_id"] in (cam_id, cam2) for m in body["markers"])
+    assert len(body["recording"]) == 1
+    assert body["recording"][0]["camera_id"] == cam_id
+    assert body["recording"][0]["duration_sec"] == 900.0
+    assert body["limits"] == {"recording": 500, "markers": 500}
+
+    filt = client.get(f"/api/timeline?date=2026-01-01&camera_id={cam_id}", headers=h).json()
+    assert {m["event_type"] for m in filt["markers"]} == {"line_cross"}
+    assert {r["camera_id"] for r in filt["recording"]} == {cam_id}
+
+    assert client.get("/api/timeline?date=nope", headers=h).status_code == 400
+
+    empty = client.get("/api/timeline?date=2027-01-01", headers=h).json()
+    assert empty["timeline"] == [] and empty["markers"] == [] and empty["recording"] == []
+
+
+def test_live_streams_health(client):
+    from apps.api.routers import live as live_mod
+
+    class _FakeProc:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def poll(self):
+            return None
+
+    saved = dict(live_mod._live_streams)
+    try:
+        live_mod._live_streams["cam-live-1"] = _FakeProc(pid=7777)
+        h = {"Authorization": _admin(client)}
+        r = client.get("/api/live/streams", headers=h)
+        assert r.status_code == 200
+        body = r.json()
+        assert isinstance(body["active"], list) and "count" in body
+        mine = [e for e in body["active"] if e["camera_id"] == "cam-live-1"]
+        assert len(mine) == 1
+        assert mine[0]["running"] is True
+        assert mine[0]["pid"] == 7777
+        assert client.get("/api/live/streams").status_code == 401
+    finally:
+        live_mod._live_streams.clear()
+        live_mod._live_streams.update(saved)
+
+
 # ── live view API ───────────────────────────────────────────────────────────
 def test_live_ticket_flow(client):
     r = client.post("/api/cameras", json={"name": "cam-l"}, headers={"Authorization": _admin(client)})
