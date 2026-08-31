@@ -15,7 +15,7 @@ import os
 import queue
 import threading
 import time
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import datetime as dt
 
@@ -46,6 +46,31 @@ log = logging.getLogger("localvision.worker")
 _route_cache: dict = {"at": 0.0, "routes": []}
 
 
+class CooldownTracker:
+    """Per-route alert suppression to prevent storms.
+
+    A route with ``cooldown_sec > 0`` will not re-fire the same channel for the
+    same ``(rule_type, camera_id)`` until the window elapses. Keys are independent
+    per (channel, rule_type, camera_id) so two routes that overlap don't share a
+    window unless they're configured identically.
+    """
+
+    def __init__(self, now: Callable[[], float] = time.time) -> None:
+        self._last: dict = {}
+        self._now = now
+
+    def is_in_cooldown(self, key: tuple, cooldown_sec: int) -> bool:
+        if cooldown_sec <= 0:
+            return False
+        return (self._now() - self._last.get(key, 0.0)) < cooldown_sec
+
+    def record(self, key: tuple) -> None:
+        self._last[key] = self._now()
+
+
+_cooldown = CooldownTracker()
+
+
 def _load_routes(rt) -> list:
     """Cache alert routes (plus the env-webhook fallback) for ~30s to avoid a DB
     round-trip on every analytic event."""
@@ -57,12 +82,12 @@ def _load_routes(rt) -> list:
         with rt.SessionLocal() as s:
             for r in s.query(AlertRoute).filter_by(enabled=True).all():
                 cfg = r.config_enc and rt.crypto.decrypt_json(r.config_enc) or {}
-                routes.append((r.channel, cfg, r.rule_type, r.camera_id))
+                routes.append((r.channel, cfg, r.rule_type, r.camera_id, r.cooldown_sec))
     except Exception as exc:  # noqa: BLE001 - degraded: no routes this round
         log.warning("failed to load alert routes: %s", exc)
     env_webhook = os.environ.get("ALERT_WEBHOOK_URL")
     if env_webhook:
-        routes.append(("webhook", {"url": env_webhook}, "*", None))
+        routes.append(("webhook", {"url": env_webhook}, "*", None, 0))
     _route_cache["routes"] = routes
     _route_cache["at"] = now
     return routes
@@ -71,10 +96,14 @@ def _load_routes(rt) -> list:
 def _build_notifiers(rt, alert: Alert) -> List:
     """Select notifiers for an alert per configured routes; always capture in-process."""
     notifiers: List = [PushNotifier()]
-    for channel, cfg, rule_type, camera_id in _load_routes(rt):
+    for channel, cfg, rule_type, camera_id, cooldown_sec in _load_routes(rt):
         if rule_type not in ("*", alert.rule_type):
             continue
         if camera_id and camera_id != alert.camera_id:
+            continue
+        cd_key = (channel, rule_type, camera_id)
+        if _cooldown.is_in_cooldown(cd_key, cooldown_sec):
+            log.debug("suppressed by cooldown: %s %s cam=%s", channel, rule_type, camera_id)
             continue
         if channel == "webhook":
             url = cfg.get("url")
@@ -86,19 +115,23 @@ def _build_notifiers(rt, alert: Alert) -> List:
                 log.warning("skipping unvalidated webhook route for %s", alert.rule_type)
                 continue
             notifiers.append(WebhookNotifier(url))
+            _cooldown.record(cd_key)
         elif channel == "email":
             try:
                 notifiers.append(build_notifier("email", cfg))
+                _cooldown.record(cd_key)
             except Exception as exc:  # noqa: BLE001 - bad channel config
                 log.warning("skipping email route: %s", exc)
         elif channel == "mqtt":
             try:
                 notifiers.append(build_notifier("mqtt", cfg))
+                _cooldown.record(cd_key)
             except Exception as exc:  # noqa: BLE001 - bad channel config / missing broker
                 log.warning("skipping mqtt route: %s", exc)
         elif channel == "push":
             try:
                 notifiers.append(build_notifier("push", cfg))
+                _cooldown.record(cd_key)
             except Exception as exc:  # noqa: BLE001 - bad channel config / unreachable ntfy
                 log.warning("skipping push route: %s", exc)
     return notifiers

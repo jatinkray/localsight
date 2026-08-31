@@ -281,6 +281,7 @@ class AlertRoute(Base):
     channel: Mapped[str] = mapped_column(String(16))  # webhook | email | push
     config_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    cooldown_sec: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

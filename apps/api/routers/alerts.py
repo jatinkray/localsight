@@ -30,6 +30,7 @@ class RouteCreate(BaseModel):
     channel: str
     config: dict | None = None  # webhook url / smtp / recipients — encrypted at rest
     enabled: bool = True
+    cooldown_sec: int = 0  # per-route suppression window (0 = disabled)
 
 
 @router.get("/alerts/routes", dependencies=[Depends(require_permission("alerts:manage"))])
@@ -37,7 +38,8 @@ def list_routes(db: Session = Depends(get_db)):
     rows = db.query(AlertRoute).all()
     return [
         {"id": r.id, "rule_type": r.rule_type, "camera_id": r.camera_id,
-         "channel": r.channel, "enabled": r.enabled, "created_at": r.created_at.isoformat()}
+         "channel": r.channel, "enabled": r.enabled, "cooldown_sec": r.cooldown_sec,
+         "created_at": r.created_at.isoformat()}
         for r in rows
     ]
 
@@ -49,7 +51,7 @@ def create_route(body: RouteCreate, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="unknown channel")
     route = AlertRoute(
         rule_type=body.rule_type, camera_id=body.camera_id, channel=body.channel,
-        enabled=body.enabled,
+        enabled=body.enabled, cooldown_sec=body.cooldown_sec,
         config_enc=rt.crypto.encrypt_json(body.config or {}) if body.config else None,
     )
     db.add(route)
