@@ -58,8 +58,14 @@ embeddings) before any non-local deployment — never reuse the generated dev ke
 | Embeddings | 90 days |
 | Audit | 365 days |
 
-Implement a periodic job (cron) that deletes rows/segments older than policy. All
-deletions are auditable.
+Retention is enforced **automatically** by the worker: a background sweeper deletes
+expired `VideoSegment` rows **and their backing storage objects**, expired `Event`
+rows, and expired `Snapshot` rows every hour, using the per-policy env vars above.
+You do not need a separate cron job. All deletions are auditable. Per-camera overrides
+are supported via the camera `retention` JSON field.
+
+> Warning: if the worker is not running, retention is not applied and storage/DB grow.
+> Keep the worker process up (it also runs recording, analytics, and the alert sender).
 
 ## Backup & restore (test before relying on it)
 - **Database + identity metadata + encrypted embeddings + config + audit**: `pg_dump`
@@ -78,8 +84,16 @@ python scripts/capacity.py --cameras 8 --main-bitrate-mbps 4 --sub-bitrate-mbps 
 - **App won't start**: check for placeholder secrets (`JWT_SECRET`/`MASTER_ENCRYPTION_KEY`).
 - **Camera OFFLINE**: gateway reconnects with backoff; check RTSP URL + SSRF allowlist
   (private/loopback blocked unless listed) and NVR reachability.
-- **GPU missing**: reduce `AI_INFERENCE_FPS`; reference detector needs no GPU.
-- **Storage full**: alert fires at threshold; apply retention; add capacity.
+- **GPU missing**: reduce `AI_INFERENCE_FPS`. The `reference` detector needs no GPU;
+  staged ONNX detectors use CUDA automatically when a GPU is present, CPU otherwise.
+- **No recordings / live view**: both require **FFmpeg** on `PATH` (bundled in the
+  Docker image). Confirm `ffmpeg` is installed locally and that the camera has a
+  configured main/sub stream URL.
+- **Alerts not arriving**: the worker runs the alert sender as a background service;
+  verify routes via `GET /api/alerts/routes` and that webhook URLs are on the SSRF
+  allowlist. Use `POST /api/alerts/test` to validate delivery.
+- **Storage full**: alert fires at threshold; the worker retention sweeper deletes
+  expired data automatically — keep the worker running; add capacity if needed.
 - **Token reuse errors**: refresh rotation revoked a token; re-login.
 - **Decoding failures**: ensure FFmpeg present (in Docker image); run worker non-root
   with resource limits.

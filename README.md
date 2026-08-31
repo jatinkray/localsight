@@ -1,22 +1,43 @@
 # LocalVision
 
 Local-first, privacy-by-design video intelligence platform. Continuously ingests
-RTSP/RTSPS streams from NVRs/IP cameras, detects and tracks people with **local**
-AI models, optionally identifies known individuals via privacy-preserving biometric
-processing, generates timestamped events, and serves a secure web dashboard for
-searching and reviewing a day's activity.
+RTSP/RTSPS/ONVIF streams from NVRs/IP cameras, runs **local** AI detection, tracking,
+behavior analytics, and (optional) ANPR, records the main stream on-prem, and serves
+a secure web dashboard for searching, reviewing, alerting, and live viewing.
 
 Designed for 24/7 on-premises operation: **no video leaves the site by default**,
-the system runs fully offline, and every security-sensitive action is encrypted at
+everything runs fully offline, and every security-sensitive action is encrypted at
 rest and audited.
 
 ## Principles (non-negotiable)
 
 1. **Local-first / cloud-optional** — all AI inference is local. Cloud is opt-in only.
-2. **Privacy by design** — embeddings/identities are encrypted; recognition is off by default.
-3. **Minimum video movement** — AI runs on the low-res substream; main stream is recorded.
+2. **Privacy by design** — embeddings/plates/identities are encrypted; recognition is off by default.
+3. **Minimum video movement** — AI runs on the low-res substream; the main stream is recorded.
 4. **Security-first** — Argon2id, RBAC, envelope encryption, SSRF guard, audit log, signed URLs.
 5. **Fail safe** — one camera dying never takes down the platform; automatic reconnect + backoff.
+
+## Capabilities
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Auth / RBAC / MFA / audit | ✅ production | Argon2id, JWT rotation, TOTP MFA, lockout, RBAC, immutable audit log |
+| Envelope encryption (at rest) | ✅ production | Stream URLs, embeddings, snapshots, plate data, alert config |
+| SSRF egress guard | ✅ production | Blocks private/loopback/metadata unless `SSRF_ALLOWLIST` set |
+| Person/object detection | ✅ interface; ⚙️ model-dependent | `reference` backend = CPU motion proxy (person-only). Stage an ONNX/TensorRT/OpenVINO/TFLite model for multi-class (vehicle/animal/bag/…). GPU used when present |
+| Tracking | ✅ production | SORT-style motion-prediction tracker for stable IDs; appearance ReID needs a staged embedding model |
+| Behavior analytics (rules) | ✅ production | Line-cross, intrusion, loitering, object-left/removed, crowd — per-camera JSON |
+| ANPR / LPR | ✅ pipeline; ⚙️ model-dependent | Cropped + throttled + deduped; plate values encrypted at rest. Real OCR needs a staged plate detector+OCR model |
+| Continuous recording | ✅ production | Main-stream segmented MP4 → StorageProvider; `VideoSegment` rows; requires FFmpeg |
+| Live view | ✅ production | Authorized LL-HLS gateway (ffmpeg transcode of substream); requires FFmpeg |
+| Alerts | ✅ production | Webhook / email / push routed per rule_type+camera via `AlertRoute`; webhook URLs SSRF-validated |
+| Analytics / BI | ✅ production | People counting, occupancy trend, dwell, event breakdown, heatmaps |
+| VLM semantic search | ✅ endpoint; ⚙️ model-dependent | `GET /api/analytics/search` (reference embedder unless a CLIP/VLM model is staged) |
+| Camera compatibility | ✅ ONVIF + presets | TP-Link VIGI/Tapo + ONVIF discovery + multi-vendor presets (Axis, Hanwha, Hikvision, Dahua, Reolink, Bosch, GB/T 28181) |
+
+⚙️ = works out of the box with a deterministic **reference** implementation; swap in a
+staged model via the `ModelRegistry` for production accuracy. There are no insecure
+defaults and no network calls to third parties.
 
 ## Quick start (local, zero infra)
 
@@ -28,27 +49,30 @@ uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 # open http://localhost:8000  (dashboard served at /)
 ```
 
-The app **refuses to start** if `JWT_SECRET` / `MASTER_ENCRYPTION_KEY` are missing
-or still placeholders — there are no insecure defaults.
+The app **refuses to start** if `JWT_SECRET` / `MASTER_ENCRYPTION_KEY` are missing or
+still placeholders — there are no insecure defaults.
 
 Default DB is SQLite (`sqlite:///./localvision.db`); switch to PostgreSQL by setting
 `DATABASE_URL=postgresql+psycopg://...` (see compose for a pgvector setup).
 
-**Local debug login:** bootstrap admin is `admin@localvision.local` / `CHANGE_ME_STRONG_PASSWORD`
-(from `.env.example`). See `docs/operations/runbook.md` → *Local debug access* for the
-curl/Swagger flow.
-
 Run the AI/video worker (separate process) in another shell:
 
 ```bash
-python -m apps.worker          # processes cameras via synthetic source when no stream is configured
+python -m apps.worker          # processes cameras; records + analyzes when streams are configured
 ```
+
+The worker also runs the **retention sweeper** (deletes expired recordings/events/
+snapshots) and the **alert sender** (fans analytic events out to configured channels)
+as background services.
+
+> Recording and live view require **FFmpeg** on `PATH`. The Docker image bundles it;
+> for local installs install `ffmpeg` (e.g. `apt-get install ffmpeg`).
 
 ## Tests
 
 ```bash
 pip install pytest
-pytest -q                       # 23 tests: auth, RBAC, SSRF, encryption, aggregation, pipeline, API
+pytest -q                       # 49 tests: auth, RBAC, SSRF, encryption, analytics, pipeline, API, live, alerts
 ```
 
 ## Capacity planning
@@ -66,45 +90,160 @@ docker compose -f infrastructure/compose/docker-compose.yml --env-file .env up -
 
 Brings up PostgreSQL+pgvector, the API, the AI worker, and an nginx TLS proxy.
 
+## Configuration reference
+
+All config is via environment (see `.env.example`). Highlights:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AI_DETECTOR` | `reference` | `reference` \| `onnx` \| `tensorrt` \| `openvino` \| `tflite`. Multi-class needs a staged model. |
+| `AI_MODEL_NAME` / `AI_MODEL_VERSION` | `detector` / `latest` | ModelRegistry lookup for the staged detector. |
+| `AI_INFERENCE_FPS` | `5` | Substream frames per second fed to the detector. |
+| `AI_CONFIDENCE_THRESHOLD` | `0.45` | Min detection confidence. |
+| `AI_IOU_THRESHOLD` | `0.50` | Tracker association threshold. |
+| `AI_IDENTITY_RECOGNITION_ENABLED` | `false` | Face identification (biometric) — opt-in, lawful-basis required. |
+| `AI_RULES_ENABLED` | `true` | Behavior-analytics rule engine. |
+| `AI_ANPR_ENABLED` | `false` | ANPR/LPR pipeline. |
+| `RECORD_ENABLED` | `true` | Main-stream recording. |
+| `RECORD_SEGMENT_SECONDS` | `300` | Segment length. |
+| `RETENTION_RECORDINGS_DAYS` | `7` | Recording retention (auto-swept). |
+| `RETENTION_EVENTS_DAYS` | `30` | Analytic-event retention (auto-swept). |
+| `RETENTION_SNAPSHOTS_DAYS` | `14` | Snapshot retention (auto-swept). |
+| `RETENTION_EMBEDDINGS_DAYS` | `90` | Enrollment-embedding retention. |
+| `RETENTION_AUDIT_DAYS` | `365` | Audit-log retention. |
+| `SSRF_ALLOWLIST` | `""` | Comma-separated CIDRs (e.g. `192.168.0.0/16`) permitted for camera/webhook egress. |
+| `STORAGE_BACKEND` | `local` | `local` \| `s3`. |
+| `STORAGE_LOCAL_ROOT` | `./data/storage` | Local recording/snapshot store. |
+| `ALERT_WEBHOOK_URL` | `""` | Optional global fallback webhook for all events. |
+| `LOCALVISION_LIVE_DIR` | `./data/live` | Directory for transcoded live HLS segments (served at `/live-media`). |
+
+## Camera / NVR compatibility
+
+LocalVision is RTSP/ONVIF-native.
+
+- **TP-Link VIGI / Tapo** work out of the box — `POST /api/cameras/from-nvr` provisions a
+  whole VIGI NVR (all channels) in one call; `GET /api/cameras/presets` returns vendor
+  URL templates. See `docs/integrations/tplink-vigi.md`.
+- **ONVIF discovery** — `POST /api/cameras/onvif/discover` finds devices on the LAN;
+  `POST /api/cameras/onvif/streams` returns RTSP URIs for a device profile. Both are
+  SSRF-validated and audited.
+- **Multi-vendor presets** — `GET /api/cameras/presets` includes Axis, Hanwha, Hikvision
+  (ISAPI), Dahua (CGI), Reolink, Bosch, ONVIF, and GB/T 28181 templates. Use
+  `POST /api/cameras/presets/build` to construct a URL (credentials are never echoed back).
+
+Cameras must be reachable from the server (isolated VLAN recommended). The SSRF guard
+blocks private/loopback/cloud-metadata destinations unless their CIDR is in
+`SSRF_ALLOWLIST`.
+
+## Behavior analytics (rules)
+
+Configure per camera via `PUT /api/cameras/{id}/rules`:
+
+```json
+[
+  {"type": "line_cross", "rule_id": "r1", "a": [0.5, 0.0], "b": [0.5, 1.0], "direction": 1},
+  {"type": "intrusion", "rule_id": "z1", "zone": [[0.4,0.4],[0.6,0.4],[0.6,0.6],[0.4,0.6]]},
+  {"type": "loitering", "rule_id": "l1", "zone": [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]], "dwell_sec": 10},
+  {"type": "object_left", "rule_id": "o1", "zone": [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]], "stationary_sec": 20},
+  {"type": "crowd", "rule_id": "c1", "zone": [[0.0,0.0],[1.0,0.0],[1.0,1.0],[0.0,1.0]], "threshold": 5}
+]
+```
+
+Coordinates are normalized `[0,1]` frame coordinates. Matched events become
+`Event` rows (typed `event_type`) and are fanned out to alert channels.
+
+## Alerts
+
+Create delivery routes per analytic event type and (optionally) camera:
+
+```bash
+curl -s -X POST http://localhost:8000/api/alerts/routes \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"rule_type":"intrusion","channel":"webhook","config":{"url":"https://hooks.example.com/lv"}}'
+# channels: webhook | email | push ; "*" matches all event types
+```
+
+- Webhook URLs are SSRF-validated before any outbound call.
+- `ALERT_WEBHOOK_URL` (env) is a global fallback for all events.
+- All route changes are audited; secret config is encrypted at rest and never returned to clients.
+- `POST /api/alerts/test` sends a synthetic test alert to verify delivery (no camera needed).
+
+## Live view
+
+1. `POST /api/live/ticket` issues a short-lived, encrypted, camera-scoped ticket.
+2. `GET /api/live/{camera_id}/play?ticket=...` validates the ticket and starts an
+   ffmpeg LL-HLS transcode of the camera substream; it returns the manifest at
+   `/live-media/{camera_id}/index.m3u8`. The RTSP URL and credentials are never exposed.
+3. Point an HLS player at the manifest. The media gateway honors only valid tickets.
+
+## Analytics & BI
+
+All require `analytics:view`. Example:
+
+```bash
+curl -s "http://localhost:8000/api/analytics/people-count?camera_id=$CAM&start=2026-03-01T08:00:00Z&end=2026-03-01T10:00:00Z" -H "Authorization: Bearer $TOKEN"
+# also: /api/analytics/occupancy, /api/analytics/dwell, /api/analytics/breakdown, /api/analytics/heatmap
+```
+
+### Semantic (NL) search
+
+```bash
+curl -s "http://localhost:8000/api/analytics/search?q=person%20near%20the%20gate&camera_id=$CAM" -H "Authorization: Bearer $TOKEN"
+```
+
+Ranks archived events by cosine similarity to the query. A real CLIP/VLM backend drops
+in behind the same interface for image-aware search.
+
+## Privacy & compliance
+
+- Face identification is **off by default**; enable only with a documented lawful basis.
+- Event analytics are light-touch (no biometric retention by default).
+- Plates and embeddings are **encrypted at rest**; plate events store an encrypted blob
+  plus an anonymized hash.
+- An immutable audit log records every sensitive action (camera changes, alert routes,
+  live-ticket issuance, ONVIF discovery/streams).
+
 ## Repository layout
 
 ```
 apps/
   api/        FastAPI app: routers, config, db, bootstrap, dependencies
-  worker/     AI/video worker: per-camera pipelines, stream gateway
+  worker/     AI/video worker: per-camera pipelines, stream gateway, retention + alert sender
 packages/
-  domain/     ORM models, Pydantic schemas, event aggregation, time utils
+  domain/     ORM models, Pydantic schemas, event aggregation, analytics/BI
   security/   passwords, JWT, RBAC, crypto, SSRF, rate-limit, MFA, audit, headers
-  ai/         swappable Detector/Tracker/Face/Embedder/Matcher + reference impls + pipeline
-  video/      frame sources, safe FFmpeg invocation, resilient stream gateway
+  ai/         Detector/Tracker/Face/Embedder/Matcher + reference impls + pipeline
+              detectors.py (ONNX/TensorRT/OpenVINO/TFLite), rules.py, anpr.py, vlm.py
+  video/      frame sources, safe FFmpeg invocation, resilient stream gateway,
+              onvif.py (discovery/streams), presets.py (vendors), recorder.py (segmented MP4)
   storage/    StorageProvider (local + S3), signed expiring URLs, path-traversal safe
+  notify/     alert channels (webhook / email / push) + routing
   observability/  Prometheus metrics + structured JSON logging
 infrastructure/  docker, compose, nginx, monitoring
-docs/             architecture, security, operations, api
+docs/             architecture, security, operations, integrations, api
 scripts/          gen_env.py, capacity.py
 ui/               static dashboard (served at /)
-tests/            unit + security + integration
+tests/            unit + security + integration (49 tests)
 ```
-
-## Camera/NVR compatibility
-LocalVision is RTSP/ONVIF-native. It works with **TP-Link VIGI** cameras and
-**VIGI NVR** recorders out of the box (per-channel RTSP `live/ch/<N>/stream/<1|2>`),
-and with **wired Tapo** cameras. `POST /api/cameras/from-nvr` provisions a whole
-VIGI NVR in one call; `GET /api/cameras/presets` returns vendor URL templates. See
-`docs/integrations/tplink-vigi.md`.
 
 ## Status vs. plan
 
-Implemented and tested: auth (Argon2id, JWT rotation, MFA, lockout), RBAC,
-envelope encryption, immutable audit log, SSRF egress guard, signed media URLs,
-path-traversal-safe storage, event aggregation, pluggable AI pipeline (reference
-impl runs without GPU/ffmpeg), camera/NVR management, persons/enrollment, events
+Implemented and tested: auth (Argon2id, JWT rotation, MFA, lockout), RBAC, envelope
+encryption, immutable audit log, SSRF egress guard (camera + webhook + ONVIF), signed
+media URLs, path-traversal-safe storage, event aggregation, pluggable AI pipeline,
+**multi-class detector backends (ONNX/TensorRT/OpenVINO/TFLite) + reference fallback**,
+**SORT-style tracker**, **behavior rule engine**, **ANPR pipeline (encrypted plates)**,
+**continuous main-stream recording**, **LL-HLS live view**, **webhook/email/push alerts
+with DB routing**, **analytics/BI endpoints**, **VLM semantic search endpoint**, camera/NVR
+management (TP-Link + ONVIF discovery + multi-vendor presets), persons/enrollment, events
 search, timeline, capacity model, Docker Compose, and a runnable dashboard.
 
-Deliberately **reference** (swappable, not production-tuned): person/face models
-are deterministic placeholders so the system runs on any machine; drop in
-YOLO/ONNX detectors and a real face model via the same interfaces. Recording of
-real video requires FFmpeg (installed in the Docker image) and a camera substream.
+Reference (swappable, not production-tuned) until a model is staged: detection is a
+CPU motion proxy emitting `person` only by default; ANPR OCR and VLM embedding are
+deterministic placeholders; appearance-based ReID is not yet implemented (motion
+prediction only). Drop in YOLO/RT-DETR (ONNX), a plate detector+OCR, and a CLIP/VLM model
+via the `ModelRegistry` to reach production accuracy — the interfaces are unchanged.
 
-See `docs/` for the architecture decision records, threat model, ERD, security
-controls, and the operations runbook.
+See `docs/` for architecture decision records, threat model, ERD, security controls, and
+the operations runbook. Market positioning and the phased roadmap are in
+`docs/PRODUCT_STRATEGY_2026.md`.
