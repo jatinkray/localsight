@@ -96,6 +96,11 @@ def _build_notifiers(rt, alert: Alert) -> List:
                 notifiers.append(build_notifier("mqtt", cfg))
             except Exception as exc:  # noqa: BLE001 - bad channel config / missing broker
                 log.warning("skipping mqtt route: %s", exc)
+        elif channel == "push":
+            try:
+                notifiers.append(build_notifier("push", cfg))
+            except Exception as exc:  # noqa: BLE001 - bad channel config / unreachable ntfy
+                log.warning("skipping push route: %s", exc)
     return notifiers
 
 

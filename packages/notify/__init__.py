@@ -85,25 +85,85 @@ class EmailNotifier(Notifier):
 
 
 class PushNotifier(Notifier):
-    """Reference push channel: delivers to a local subscriber callback/log.
+    """Push notifications via ntfy (self-hostable) with a reference fallback.
 
-    Production would target a push gateway (APNs/FCM) or a websocket fan-out;
-    the interface is identical so swapping in a real gateway is a one-line change.
+    In production, configure with an ntfy ``server`` and ``topic`` (and optional
+    auth token, priority 1-5, tags, click URL) and the notifier POSTs to the
+    ntfy HTTP API. The HTTP transport is injectable (``post``) so the test suite
+    never hits the network. Without ntfy config, behaves as the reference
+    in-process rolling buffer + optional ``handler`` callback (useful for local
+    dev and as a debug capture of every dispatched alert).
     """
 
     channel = "push"
 
-    def __init__(self, handler: Callable[[Alert], None] | None = None) -> None:
+    def __init__(
+        self,
+        handler: Callable[[Alert], None] | None = None,
+        server: str | None = None,
+        topic: str | None = None,
+        auth_token: str | None = None,
+        priority: int | None = None,
+        tags: list[str] | str | None = None,
+        click: str | None = None,
+        title: str | None = None,
+        post: Callable[[str, dict, dict], None] | None = None,
+    ) -> None:
         self._handler = handler
-        # Bounded buffer: the long-running worker is a single process, so an
-        # unbounded list would leak memory as alerts accumulate. Keep a rolling
-        # window only.
+        self.server = (server or "").rstrip("/") or None
+        self.topic = topic
+        self.auth_token = auth_token
+        self.priority = priority
+        self.tags = tags
+        self.click = click
+        self.title = title
+        self._post = post
         self.sent: deque = deque(maxlen=500)
+
+    def _ntfy_enabled(self) -> bool:
+        return bool(self.server and self.topic)
+
+    def _build_payload(self, alert: Alert) -> tuple[str, dict, dict]:
+        url = f"{self.server}/{self.topic.lstrip('/')}"
+        body: dict = {
+            "title": self.title or alert.title or f"LocalSight · {alert.rule_type}",
+            "message": alert.message or alert.title or alert.rule_type,
+        }
+        p = self.priority if isinstance(self.priority, int) else 3
+        body["priority"] = max(1, min(5, p))
+        tags_list: list[str] = []
+        if isinstance(self.tags, list):
+            tags_list = [str(t) for t in self.tags if str(t).strip()]
+        elif isinstance(self.tags, str) and self.tags.strip():
+            tags_list = [t.strip() for t in self.tags.split(",") if t.strip()]
+        if not tags_list:
+            tags_list = ["localsight"]
+        tags_list.append(alert.severity or "info")
+        if alert.camera_id:
+            tags_list.append(f"camera:{alert.camera_id}")
+        body["tags"] = tags_list
+        if self.click:
+            body["click"] = self.click
+        headers = {"Content-Type": "application/json"}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+        return url, body, headers
 
     def send(self, alert: Alert) -> None:
         self.sent.append(alert)
         if self._handler:
             self._handler(alert)
+        if not self._ntfy_enabled():
+            return
+        url, body, headers = self._build_payload(alert)
+        if self._post:
+            self._post(url, body, headers)
+            return
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError("httpx is required for ntfy push delivery") from exc
+        httpx.post(url, json=body, headers=headers, timeout=10)
 
 
 class MqttNotifier(Notifier):
@@ -201,6 +261,17 @@ def build_notifier(channel: str, config: dict) -> Notifier:
             tls=bool(config.get("tls", False)),
             qos=int(config.get("qos", 0)),
             retain=bool(config.get("retain", True)),
+        )
+    if channel == "push":
+        return PushNotifier(
+            server=config.get("server"),
+            topic=config.get("topic"),
+            auth_token=config.get("auth_token"),
+            priority=config.get("priority"),
+            tags=config.get("tags"),
+            click=config.get("click"),
+            title=config.get("title"),
+            post=config.get("_post"),
         )
     return PushNotifier()
 

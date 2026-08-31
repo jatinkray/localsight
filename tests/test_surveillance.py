@@ -25,7 +25,7 @@ from packages.ai.rules import (
 )
 from packages.ai.vlm import ReferenceSceneEmbedder, SemanticSearch
 from packages.domain.models import AuditLog, Camera, Event, Track, VideoSegment
-from packages.notify import Alert, MqttNotifier
+from packages.notify import Alert, MqttNotifier, PushNotifier
 from packages.video import onvif, presets
 from packages.video.recorder import Recorder, segment_boundary, segment_key
 
@@ -341,6 +341,16 @@ def test_alerts_api(client):
     assert client.delete(f"/api/alerts/routes/{mrid}", headers=h).status_code == 200
     # test alert delivers to 0 webhooks (env not set) -> no crash
     assert client.post("/api/alerts/test", headers=h).json()["delivered"] == 0
+    # push (ntfy) channel accepted; unreachable server -> 0 delivered, no crash
+    push_cfg = {"server": "http://127.0.0.1:1", "topic": "localsight-test", "priority": 3}
+    p = client.post("/api/alerts/routes", json={"rule_type": "*", "channel": "push", "config": push_cfg}, headers=h)
+    assert p.status_code == 200
+    prid = p.json()["id"]
+    listing2 = client.get("/api/alerts/routes", headers=h).json()
+    assert any(item["id"] == prid and item["channel"] == "push" for item in listing2)
+    assert all("config" not in item for item in listing2)
+    assert client.post("/api/alerts/test", headers=h).json()["delivered"] == 0
+    assert client.delete(f"/api/alerts/routes/{prid}", headers=h).status_code == 200
     # analytic events list works
     assert client.get("/api/alerts/events", headers=h).status_code == 200
     assert client.delete(f"/api/alerts/routes/{rid}", headers=h).status_code == 200
@@ -387,6 +397,51 @@ def test_mqtt_notifier_topics_render_and_collapse():
                         publish=lambda t, p, q, r: seen.append(t))
     bare.send(Alert(rule_id="r2", rule_type="*", camera_id=""))
     assert seen[-1] == "localsight/unknown/alerts"
+
+
+# ── push notifier (ntfy) ─────────────────────────────────────────────────────
+def test_push_notifier_ntfy():
+    captured = {}
+
+    def fake_post(url, body, headers):
+        captured["url"] = url
+        captured["body"] = body
+        captured["headers"] = headers
+
+    ntf = PushNotifier(
+        server="https://ntfy.sh", topic="alerts-xyz",
+        auth_token="tk-123", priority=4, tags=["loc", "security"],
+        click="https://example.com", title="LS", post=fake_post,
+    )
+    alert = Alert(rule_id="r1", rule_type="intrusion", camera_id="cam-1",
+                  severity="warning", title="Intruder", message="at gate",
+                  detail={"zone": "gate"}, ts="2026-01-01T00:00:00Z")
+    ntf.send(alert)
+
+    assert captured["url"] == "https://ntfy.sh/alerts-xyz"
+    assert captured["headers"]["Authorization"] == "Bearer tk-123"
+    assert captured["headers"]["Content-Type"] == "application/json"
+    body = captured["body"]
+    assert body["title"] == "LS"
+    assert body["message"] == "at gate"
+    assert body["priority"] == 4
+    assert body["click"] == "https://example.com"
+    assert "loc" in body["tags"] and "security" in body["tags"]
+    assert "warning" in body["tags"] and "camera:cam-1" in body["tags"]
+    assert len(ntf.sent) == 1 and ntf.sent[0] is alert
+
+
+def test_push_notifier_reference_fallback():
+    posted: list = []
+    handled: list = []
+    ntf = PushNotifier(handler=lambda a: handled.append(a),
+                       post=lambda u, b, h: posted.append(u))
+    alert = Alert(rule_id="r2", rule_type="line_cross", camera_id="c",
+                  severity="info", title="cross", message="m")
+    ntf.send(alert)
+    assert posted == []
+    assert len(handled) == 1 and handled[0] is alert
+    assert len(ntf.sent) == 1
 
 
 # ── event clip export ────────────────────────────────────────────────────────
