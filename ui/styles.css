@@ -38,6 +38,7 @@ button:hover { filter: brightness(1.1); }
 header {
   display: flex; align-items: center; gap: 16px; padding: 10px 16px;
   background: var(--bg2); border-bottom: 1px solid var(--border);
+  position: relative;
 }
 .brand { font-weight: 700; letter-spacing: .3px; }
 nav { display: flex; gap: 6px; flex: 1; }
@@ -60,3 +61,19 @@ th { color: var(--muted); font-weight: 600; }
 .tl-cam { margin-bottom: 10px; }
 .tl-bar { position: relative; height: 22px; background: #0b0f14; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .tl-seg { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: .7; }
+
+/* Responsive / mobile */
+.nav-toggle { display: none; font-size: 18px; line-height: 1; }
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (max-width: 720px) {
+  .nav-toggle { display: inline-block; }
+  #nav { display: none; position: absolute; left: 0; right: 0; top: 100%;
+         flex-direction: column; gap: 4px; background: var(--bg2);
+         border-bottom: 1px solid var(--border); padding: 8px; z-index: 20; }
+  #nav.open { display: flex; }
+  #nav button { width: 100%; text-align: left; padding: 10px 12px; border-radius: 8px; }
+  #nav button.active { background: rgba(47, 129, 247, .15); border-bottom-color: transparent; }
+  button { padding: 11px 14px; }
+  main { padding: 12px; }
+  .card { padding: 14px; }
+}

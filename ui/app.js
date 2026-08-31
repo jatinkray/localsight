@@ -16,6 +16,12 @@
   function show(view) {
     document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
     document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== view));
+    const _nav = document.getElementById("nav");
+    if (_nav && _nav.classList.contains("open")) {
+      _nav.classList.remove("open");
+      const _t = document.getElementById("nav-toggle");
+      if (_t) _t.setAttribute("aria-expanded", "false");
+    }
     if (view === "dashboard") loadDashboard();
     if (view === "cameras") loadCameras();
     if (view === "events") loadEvents(0);
@@ -70,10 +76,10 @@
   async function loadCameras() {
     const data = await api("/api/cameras");
     $("#cameras-list").innerHTML = (data.items || data || []).length
-      ? `<table><thead><tr><th>Name</th><th>ID</th><th>Status</th><th>Health</th><th>Res</th></tr></thead><tbody>`
+      ? `<div class="table-scroll"><table><thead><tr><th>Name</th><th>ID</th><th>Status</th><th>Health</th><th>Res</th></tr></thead><tbody>`
         + (data.items || data).map((c) => `<tr><td>${c.name}</td><td>${c.id.slice(0,8)}</td>
           <td><span class="pill ${c.status === "ONLINE" ? "ok" : "warn"}">${c.status}</span></td>
-          <td>${c.health}</td><td>${c.resolution || "-"}</td></tr>`).join("") + `</tbody></table>`
+          <td>${c.health}</td><td>${c.resolution || "-"}</td></tr>`).join("") + `</tbody></table></div>`
       : `<p class="muted">No cameras configured.</p>`;
   }
 
@@ -101,9 +107,9 @@
   async function loadPeople() {
     const data = await api("/api/persons");
     $("#people-list").innerHTML = (data || []).length
-      ? `<table><thead><tr><th>Label</th><th>Name</th><th>Status</th></tr></thead><tbody>`
+      ? `<div class="table-scroll"><table><thead><tr><th>Label</th><th>Name</th><th>Status</th></tr></thead><tbody>`
         + data.map((p) => `<tr><td>${p.label}</td><td>${p.display_name || "-"}</td><td>${p.status}</td></tr>`).join("")
-        + `</tbody></table>`
+        + `</tbody></table></div>`
       : `<p class="muted">No identities enrolled.</p>`;
   }
 
@@ -136,6 +142,11 @@
   // wire up
   $("#login-form").addEventListener("submit", login);
   $("#logout").addEventListener("click", logout);
+  $("#nav-toggle").addEventListener("click", () => {
+    const nav = $("#nav");
+    const open = nav.classList.toggle("open");
+    $("#nav-toggle").setAttribute("aria-expanded", String(open));
+  });
   document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
   $("#ev-search").addEventListener("click", () => loadEvents(0));
   $("#ev-prev").addEventListener("click", () => loadEvents(Math.max(0, evOffset - 25)));
