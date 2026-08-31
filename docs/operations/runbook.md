@@ -2,6 +2,7 @@
 
 ## Vendor integrations
 - **TP-Link VIGI / Tapo**: RTSP/ONVIF-native. `POST /api/cameras/from-nvr` provisions a whole VIGI NVR in one call; `GET /api/cameras/presets` lists URL templates. Setup, ports, auth, and caveats: `docs/integrations/tplink-vigi.md`.
+- **Multi-vendor**: Any RTSP/ONVIF camera works. Use `POST /api/cameras/onvif/discover` to find devices on the LAN, then `POST /api/cameras/onvif/streams` to get RTSP URIs. Vendor presets available for Axis, Hanwha, Hikvision (ISAPI), Dahua (CGI), Reolink, Bosch, ONVIF, and GB/T 28181.
 
 ## Local run (no containers)
 ```bash
@@ -24,8 +25,8 @@ docker compose -f infrastructure/compose/docker-compose.yml --env-file .env up -
 
 ## Local debug access
 The bootstrap admin is created once on first run from `BOOTSTRAP_ADMIN_EMAIL` /
-`BOOTSTRAP_ADMIN_PASSWORD` in `.env` (default `admin@localvision.local` / `CHANGE_ME_STRONG_PASSWORD`
-in `.env.example`). For local debugging:
+`BOOTSTRAP_ADMIN_PASSWORD` in `.env` (default `admin@localvision.local` /
+`CHANGE_ME_STRONG_PASSWORD` in `.env.example`). For local debugging:
 
 - **UI**: open `http://localhost:8000` and sign in with those credentials.
 - **Token (curl)**:
@@ -48,6 +49,7 @@ embeddings) before any non-local deployment — never reuse the generated dev ke
 - `GET /health/ready` — DB + storage reachable.
 - `GET /api/system/health` — component statuses (authed).
 - `GET /api/system/metrics` — Prometheus exposition (authed).
+- `GET /api/live/streams` — active LL-HLS transcodes and their PIDs (authed).
 
 ## Retention (configurable, automatic)
 | Data | Default |
@@ -80,6 +82,96 @@ are supported via the camera `retention` JSON field.
 python scripts/capacity.py --cameras 8 --main-bitrate-mbps 4 --sub-bitrate-mbps 0.4 --ai-fps 5
 ```
 
+## AI detector backends
+
+Configure via `AI_DETECTOR` (environment):
+
+| Value | Runtime | Model needed |
+|-------|---------|---------------|
+| `reference` (default) | CPU, no GPU | None — frame-differencing fallback |
+| `onnx` | CPU / CUDA | YOLO/RT-DETR ONNX file staged via `ModelRegistry` |
+| `tensorrt` | NVIDIA GPU | TensorRT engine file |
+| `openvino` | Intel CPU/iGPU/NPU | OpenVINO IR |
+| `tflite` | ARM / Coral TPU | TFLite model |
+
+Set `AI_MODEL_NAME` and `AI_MODEL_VERSION` to match the registry entry. The
+`reference` backend works out of the box on any CPU with no model download.
+
+## Alert channels
+
+LocalVision routes analytic events to four channels, each configured via
+`POST /api/alerts/routes`:
+
+### Webhook
+```json
+{
+  "rule_type": "intrusion",
+  "channel": "webhook",
+  "config": {"url": "https://hooks.example.com/localsight"},
+  "cooldown_sec": 300
+}
+```
+HTTP POST with JSON body; URL is SSRF-validated against `SSRF_ALLOWLIST`.
+
+### MQTT
+```json
+{
+  "rule_type": "anpr",
+  "channel": "mqtt",
+  "config": {
+    "host": "192.168.1.100", "port": 1883,
+    "topic": "localsight/{camera_id}/alerts",
+    "username": "mqtt_user", "password": "s3cret",
+    "qos": 1, "retain": false
+  },
+  "cooldown_sec": 60
+}
+```
+Publishes a JSON message per alert to the configured topic. Template variables
+`{camera_id}` and `{rule_type}` are expanded.
+
+### Push (ntfy.sh)
+```json
+{
+  "rule_type": "*",
+  "channel": "push",
+  "config": {
+    "server": "https://ntfy.sh",
+    "topic": "localsight-alerts",
+    "priority": 4,
+    "tags": ["security", "camera"],
+    "click": "https://dashboard.example.com/events"
+  }
+}
+```
+Delivers to ntfy.sh. Configure `auth_token` for private topics.
+
+### Email
+```json
+{
+  "rule_type": "intrusion",
+  "channel": "email",
+  "config": {
+    "smtp_host": "smtp.example.com", "smtp_port": 587,
+    "from": "alerts@example.com", "recipients": ["ops@example.com"]
+  },
+  "cooldown_sec": 120
+}
+```
+
+### Alert cooldown
+Every route has a `cooldown_sec` field. Within the cooldown window, the same
+(channel × rule_type × camera_id) key suppresses re-firing. This prevents
+alert storms when the same event fires repeatedly. A cooldown of `0` disables
+suppression.
+
+### Test alert delivery
+```bash
+# Verify all routes without touching a camera
+curl -X POST http://localhost:8000/api/alerts/test -H "Authorization: Bearer $TOKEN"
+# => {"delivered": 2}
+```
+
 ## Troubleshooting
 - **App won't start**: check for placeholder secrets (`JWT_SECRET`/`MASTER_ENCRYPTION_KEY`).
 - **Camera OFFLINE**: gateway reconnects with backoff; check RTSP URL + SSRF allowlist
@@ -92,11 +184,20 @@ python scripts/capacity.py --cameras 8 --main-bitrate-mbps 4 --sub-bitrate-mbps 
 - **Alerts not arriving**: the worker runs the alert sender as a background service;
   verify routes via `GET /api/alerts/routes` and that webhook URLs are on the SSRF
   allowlist. Use `POST /api/alerts/test` to validate delivery.
+- **Alert storm**: set `cooldown_sec` on routes to suppress rapid re-firing.
+- **MQTT not connecting**: verify broker is reachable, credentials are correct,
+  and topic template is valid. Unreachable broker is silently skipped (no crash).
+- **ntfy push not working**: check `server` URL, `topic` name, and that the auth_token
+  is set for private topics. An unreachable server returns 0 delivered.
 - **Storage full**: alert fires at threshold; the worker retention sweeper deletes
   expired data automatically — keep the worker running; add capacity if needed.
 - **Token reuse errors**: refresh rotation revoked a token; re-login.
 - **Decoding failures**: ensure FFmpeg present (in Docker image); run worker non-root
   with resource limits.
+- **Live stream PID 0 / not running**: ffmpeg may not be on PATH; check `/api/live/streams`
+  returns `"running": false`. Install ffmpeg or check that the camera's substream URL is reachable.
+- **Event clip returns no segments**: the event has no overlapping `VideoSegment` rows in its
+  time window. Check that recording is enabled (`RECORD_ENABLED=true`) and segments exist.
 
 ## Secure deployment checklist
 - [ ] Unique secrets generated (never placeholders); KEK backed up in secrets manager.

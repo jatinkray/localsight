@@ -22,15 +22,15 @@ rest and audited.
 | Area | Status | Notes |
 |------|--------|-------|
 | Auth / RBAC / MFA / audit | ✅ production | Argon2id, JWT rotation, TOTP MFA, lockout, RBAC, immutable audit log |
-| Envelope encryption (at rest) | ✅ production | Stream URLs, embeddings, snapshots, plate data, alert config |
+| Envelope encryption (at rest) | ✅ production | Stream URLs, embeddings, snapshots, plate data, alert config, MQTT credentials |
 | SSRF egress guard | ✅ production | Blocks private/loopback/metadata unless `SSRF_ALLOWLIST` set |
-| Person/object detection | ✅ interface; ⚙️ model-dependent | `reference` backend = CPU motion proxy (person-only). Stage an ONNX/TensorRT/OpenVINO/TFLite model for multi-class (vehicle/animal/bag/…). GPU used when present |
+| Person/object detection | ✅ production | `reference` backend = CPU motion proxy (person-only). `onnx` backend for multi-class (person/vehicle/bicycle/motorcycle/bus/truck/animal/bag/package) via staged ONNX model; lazy `onnxruntime`, GPU auto-detected |
 | Tracking | ✅ production | SORT-style motion-prediction tracker for stable IDs; appearance ReID needs a staged embedding model |
 | Behavior analytics (rules) | ✅ production | Line-cross, intrusion, loitering, object-left/removed, crowd — per-camera JSON |
 | ANPR / LPR | ✅ pipeline; ⚙️ model-dependent | Cropped + throttled + deduped; plate values encrypted at rest. Real OCR needs a staged plate detector+OCR model |
 | Continuous recording | ✅ production | Main-stream segmented MP4 → StorageProvider; `VideoSegment` rows; requires FFmpeg |
 | Live view | ✅ production | Authorized LL-HLS gateway (ffmpeg transcode of substream); requires FFmpeg |
-| Alerts | ✅ production | Webhook / email / push routed per rule_type+camera via `AlertRoute`; webhook URLs SSRF-validated |
+| Alerts | ✅ production | Webhook / email / MQTT / push routed per rule_type+camera via `AlertRoute`; per-route cooldown to prevent alert storms; webhook URLs SSRF-validated |
 | Analytics / BI | ✅ production | People counting, occupancy trend, dwell, event breakdown, heatmaps |
 | VLM semantic search | ✅ endpoint; ⚙️ model-dependent | `GET /api/analytics/search` (reference embedder unless a CLIP/VLM model is staged) |
 | Camera compatibility | ✅ ONVIF + presets | TP-Link VIGI/Tapo + ONVIF discovery + multi-vendor presets (Axis, Hanwha, Hikvision, Dahua, Reolink, Bosch, GB/T 28181) |
@@ -72,7 +72,7 @@ as background services.
 
 ```bash
 pip install pytest
-pytest -q                       # 49 tests: auth, RBAC, SSRF, encryption, analytics, pipeline, API, live, alerts
+pytest -q                       # 66 tests: auth, RBAC, SSRF, encryption, analytics, pipeline, API, live, alerts, ONNX detector
 ```
 
 ## Capacity planning
