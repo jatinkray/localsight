@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_db, get_runtime, require_permission
-from packages.domain.models import Event
+from packages.domain.models import Event, VideoSegment
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -100,3 +100,58 @@ def export_event(event_id: str, request: Request, db: Session = Depends(get_db),
                 detail={"watermark": False, "camera_id": ev.camera_id})
     db.commit()
     return {"url": url, "expires_in": 300}
+
+
+@router.get("/{event_id}/clip", dependencies=[Depends(require_permission("events:export"))])
+def event_clip(event_id: str, request: Request, db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)):
+    """Return a signed, expiring manifest of the VideoSegment rows that overlap
+    this event's time window so an operator can download a full clip.
+
+    Segments are returned in start-time order. Each carries a short-lived signed
+    download URL produced by the storage layer (works for both local and S3
+    backends). Every export is recorded in the immutable audit log.
+    """
+    ev = db.get(Event, event_id)
+    if not ev:
+        raise HTTPException(status_code=404, detail="event not found")
+    if ev.timestamp_end < ev.timestamp_start:
+        raise HTTPException(status_code=400, detail="invalid event window")
+    q = (
+        select(VideoSegment)
+        .where(VideoSegment.camera_id == ev.camera_id)
+        .where(VideoSegment.start_ts < ev.timestamp_end)
+        .where(VideoSegment.end_ts > ev.timestamp_start)
+        .order_by(VideoSegment.start_ts.asc())
+        .limit(200)
+    )
+    rows = db.execute(q).scalars().all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="no recording segments for this event")
+    expires = 300
+    segments = [
+        {
+            "id": s.id,
+            "start_ts": s.start_ts.isoformat(),
+            "end_ts": s.end_ts.isoformat(),
+            "duration_sec": s.duration_sec,
+            "size_bytes": s.size_bytes,
+            "url": rt.storage.sign_get_url(s.storage_key, expires_sec=expires),
+        }
+        for s in rows
+    ]
+    write_audit(
+        db, user=request.state.user, action="video.clip.assemble",
+        resource=event_id, request_id=getattr(request.state, "request_id", "-"),
+        detail={"camera_id": ev.camera_id, "segment_count": len(segments)},
+    )
+    db.commit()
+    return {
+        "event_id": ev.id,
+        "camera_id": ev.camera_id,
+        "start_ts": ev.timestamp_start.isoformat(),
+        "end_ts": ev.timestamp_end.isoformat(),
+        "segment_count": len(segments),
+        "total_size_bytes": sum(s.size_bytes for s in rows),
+        "segments": segments,
+        "expires_in": expires,
+    }

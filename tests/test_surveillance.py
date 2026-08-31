@@ -24,7 +24,7 @@ from packages.ai.rules import (
     segments_intersect,
 )
 from packages.ai.vlm import ReferenceSceneEmbedder, SemanticSearch
-from packages.domain.models import Camera, Event, Track
+from packages.domain.models import AuditLog, Camera, Event, Track, VideoSegment
 from packages.notify import Alert, MqttNotifier
 from packages.video import onvif, presets
 from packages.video.recorder import Recorder, segment_boundary, segment_key
@@ -387,6 +387,90 @@ def test_mqtt_notifier_topics_render_and_collapse():
                         publish=lambda t, p, q, r: seen.append(t))
     bare.send(Alert(rule_id="r2", rule_type="*", camera_id=""))
     assert seen[-1] == "localsight/unknown/alerts"
+
+
+# ── event clip export ────────────────────────────────────────────────────────
+def test_event_clip_export(client):
+    h = {"Authorization": _admin(client)}
+    r = client.post("/api/cameras", json={"name": "cam-clip"}, headers=h)
+    assert r.status_code == 200, r.text
+    cam_id = r.json()["id"]
+
+    rt = client.app.state.runtime
+    t0 = dt.datetime(2026, 1, 1, 0, 0, 0, tzinfo=dt.timezone.utc)
+    payload_a = b"\x00\x00\x00\x18ftypisom" + b"A" * 64
+    payload_b = b"\x00\x00\x00\x18ftypisom" + b"B" * 64
+    key_a = f"{cam_id}/2026-01-01T00-00-00/seg-a.mp4"
+    key_b = f"{cam_id}/2026-01-01T00-05-00/seg-b.mp4"
+    key_out = f"{cam_id}/2026-01-01T02-00-00/seg-out.mp4"
+    rt.storage.put(key_a, payload_a, content_type="video/mp4")
+    rt.storage.put(key_b, payload_b, content_type="video/mp4")
+    rt.storage.put(key_out, payload_a, content_type="video/mp4")
+
+    seg_a_start = t0
+    seg_a_end = t0 + dt.timedelta(seconds=60)
+    seg_b_start = t0 + dt.timedelta(seconds=300)
+    seg_b_end = seg_b_start + dt.timedelta(seconds=60)
+    seg_out_start = t0 + dt.timedelta(hours=2)
+    seg_out_end = seg_out_start + dt.timedelta(seconds=60)
+    with rt.SessionLocal() as s:
+        s.add_all([
+            VideoSegment(camera_id=cam_id, storage_key=key_a,
+                         start_ts=seg_a_start, end_ts=seg_a_end,
+                         duration_sec=60.0, size_bytes=len(payload_a)),
+            VideoSegment(camera_id=cam_id, storage_key=key_b,
+                         start_ts=seg_b_start, end_ts=seg_b_end,
+                         duration_sec=60.0, size_bytes=len(payload_b)),
+            VideoSegment(camera_id=cam_id, storage_key=key_out,
+                         start_ts=seg_out_start, end_ts=seg_out_end,
+                         duration_sec=60.0, size_bytes=len(payload_a)),
+        ])
+        ev = Event(camera_id=cam_id,
+                   timestamp_start=t0 + dt.timedelta(seconds=10),
+                   timestamp_end=t0 + dt.timedelta(seconds=320),
+                   event_type="line_cross", confidence=0.9,
+                   bbox={"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2})
+        s.add(ev)
+        s.commit()
+        ev_id = ev.id
+
+    r = client.get(f"/api/events/{ev_id}/clip", headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["event_id"] == ev_id
+    assert body["camera_id"] == cam_id
+    assert body["segment_count"] == 2
+    assert body["expires_in"] == 300
+    starts = [seg["start_ts"] for seg in body["segments"]]
+    assert starts == sorted(starts)
+    assert all("/api/video/" in seg["url"] and "exp=" in seg["url"] and "sig=" in seg["url"]
+               for seg in body["segments"])
+    expected_payloads = [payload_a, payload_b]
+    for seg, expected in zip(body["segments"], expected_payloads):
+        fetched = client.get(seg["url"], headers=h)
+        assert fetched.status_code == 200, seg["url"]
+        assert fetched.content == expected
+
+    vh = {"Authorization": _viewer(client)}
+    assert client.get(f"/api/events/{ev_id}/clip", headers=vh).status_code == 403
+
+    with rt.SessionLocal() as s:
+        lonely = Event(camera_id=cam_id,
+                       timestamp_start=t0 + dt.timedelta(days=365),
+                       timestamp_end=t0 + dt.timedelta(days=365, seconds=10),
+                       event_type="intrusion", confidence=0.8,
+                       bbox={"x": 0, "y": 0, "w": 0.1, "h": 0.1})
+        s.add(lonely)
+        s.commit()
+        lonely_id = lonely.id
+    assert client.get(f"/api/events/{lonely_id}/clip", headers=h).status_code == 404
+    assert client.get("/api/events/does-not-exist/clip", headers=h).status_code == 404
+
+    with rt.SessionLocal() as s:
+        audit_rows = s.query(AuditLog).filter_by(
+            action="video.clip.assemble", resource=ev_id).all()
+        assert len(audit_rows) == 1
+        assert audit_rows[0].detail == {"camera_id": cam_id, "segment_count": 2}
 
 
 # ── live view API ───────────────────────────────────────────────────────────
