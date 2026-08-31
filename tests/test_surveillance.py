@@ -156,9 +156,176 @@ def test_onnx_detector_requires_runtime(monkeypatch):
     from packages.ai.registry import ModelRegistry
 
     monkeypatch.setattr(detectors, "ModelRegistry", lambda *a, **k: ModelRegistry())
-    # registry is empty -> build_detector raises (no staged model)
-    with pytest.raises((RuntimeError, KeyError)):
-        detectors.build_detector(S(), ModelRegistry())
+    registry = ModelRegistry()
+    monkeypatch.setattr(registry, "verify", lambda n, v: False)
+    with pytest.raises(RuntimeError, match="integrity"):
+        detectors.build_detector(S(), registry)
+
+
+def test_postprocess_yolo_synthetic(monkeypatch):
+    import numpy as np
+
+    labels = ["person", "vehicle", "bicycle"]
+
+    raw = np.array([
+        [100, 100, 50, 50, 0.9, 0.05, 0.0],   # person, conf 0.9
+        [200, 200, 60, 60, 0.25, 0.3, 0.05],   # vehicle, conf 0.3 (below conf_thr)
+        [300, 300, 40, 40, 0.05, 0.05, 0.95],  # bicycle, conf 0.95
+    ], dtype=np.float32)
+
+    result = detectors.postprocess_yolo(
+        raw, labels, conf_thr=0.4, iou_thr=0.45,
+        in_hw=(640, 640), frame_hw=(360, 640),
+    )
+
+    assert len(result) == 2
+    label_names = {d.label for d in result}
+    assert "person" in label_names
+    assert "bicycle" in label_names
+    confs = [d.confidence for d in result]
+    assert any(abs(c - 0.9) < 0.01 for c in confs)
+    assert any(abs(c - 0.95) < 0.01 for c in confs)
+    # bboxes are normalized (0,1)
+    for d in result:
+        x, y, w, h = d.bbox
+        assert 0 <= x <= 1 and 0 <= y <= 1 and 0 < w <= 1 and 0 < h <= 1
+
+
+def test_postprocess_yolo_rejects_low_conf(monkeypatch):
+    import numpy as np
+
+    labels = ["person"]
+    raw = np.array([[100, 100, 50, 50, 0.1, 0.0]], dtype=np.float32)
+    result = detectors.postprocess_yolo(raw, labels, conf_thr=0.5)
+    assert result == []
+
+
+def test_postprocess_yolo_nms_removes_overlap(monkeypatch):
+    import numpy as np
+
+    labels = ["person", "vehicle"]
+    raw = np.array([
+        [100, 100, 80, 80, 0.9, 0.0, 0.0],
+        [105, 105, 80, 80, 0.85, 0.0, 0.0],  # heavily overlapping, lower conf
+        [400, 400, 50, 50, 0.7, 0.0, 0.0],   # distinct
+    ], dtype=np.float32)
+
+    result = detectors.postprocess_yolo(
+        raw, labels, conf_thr=0.5, iou_thr=0.4,
+        in_hw=(640, 640), frame_hw=(360, 640),
+    )
+
+    assert len(result) == 2
+    confs = [d.confidence for d in result]
+    assert any(abs(c - 0.9) < 0.01 for c in confs)
+    assert any(abs(c - 0.7) < 0.01 for c in confs)
+    assert not any(abs(c - 0.85) < 0.01 for c in confs)
+
+
+def test_onnx_detector_lazy_session(monkeypatch):
+    import sys
+
+    class FakeInput:
+        name = "input"
+
+    class FakeSession:
+        get_inputs = lambda self: [FakeInput()]
+        run = lambda self, *args, **kwargs: [[]]
+
+    class FakeOrt:
+        InferenceSession = lambda *a, **k: FakeSession()
+        CUDAExecutionProvider = "CUDAExecutionProvider"
+        CPUExecutionProvider = "CPUExecutionProvider"
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", FakeOrt())
+    monkeypatch.setattr(detectors.ONNXDetector, "_infer", lambda self, img: [])
+    d = detectors.ONNXDetector("fake/model.onnx")
+    assert d._session is None
+    d._ensure_session()
+    assert d._session is not None
+    assert d._session is d._session  # idempotent
+
+
+def test_runtime_detector_preprocess_and_decode(monkeypatch):
+    import numpy as np
+
+    d = detectors.ONNXDetector.__new__(detectors.ONNXDetector)
+    d.frame_hw = (360, 640)
+    d._session = None
+
+    img_rgb = np.random.randint(0, 255, (360, 640, 3), dtype=np.uint8)
+    pre = d._preprocess(img_rgb)
+    assert pre.shape == (1, 3, 360, 640)
+    assert pre.dtype == np.float32
+    assert pre.min() >= 0.0 and pre.max() <= 1.0
+
+    raw_bytes = bytes(img_rgb.tobytes())
+    decoded = d._decode(raw_bytes)
+    assert decoded.shape == (360, 640, 3)
+
+
+def test_build_detector_unknown_backend():
+    class S:
+        ai_detector = "bogus"
+        ai_confidence_threshold = 0.45
+
+    import pytest
+    with pytest.raises(RuntimeError, match="unknown AI_DETECTOR backend"):
+        detectors.build_detector(S(), None)
+
+
+def test_build_detector_tensorrt_not_installed(monkeypatch):
+    import pytest
+
+    class S:
+        ai_detector = "tensorrt"
+        ai_confidence_threshold = 0.45
+        ai_model_name = "detector"
+        ai_model_version = "latest"
+
+    monkeypatch.setattr(detectors, "TensorRTDetector",
+                       lambda *a, **k: (_ for _ in ()).throw(
+                           RuntimeError("tensorrt is not installed")))
+    from packages.ai.registry import ModelRegistry, ModelRecord
+    reg = ModelRegistry()
+    rec = ModelRecord(name="detector", version="latest",
+                      path="/tmp/fake.engine", hash_sha256="a" * 64)
+    reg._models[("detector", "latest")] = rec
+    monkeypatch.setattr(ModelRegistry, "verify", lambda self, n, v: True)
+    with pytest.raises(RuntimeError, match="not installed"):
+        detectors.build_detector(S(), reg)
+
+
+def test_build_detector_unknown_backend():
+    class S:
+        ai_detector = "bogus"
+        ai_confidence_threshold = 0.45
+
+    import pytest
+    with pytest.raises(RuntimeError, match="unknown AI_DETECTOR backend"):
+        detectors.build_detector(S(), None)
+
+
+def test_build_detector_tensorrt_not_installed(monkeypatch):
+    import pytest
+
+    class S:
+        ai_detector = "tensorrt"
+        ai_confidence_threshold = 0.45
+        ai_model_name = "detector"
+        ai_model_version = "latest"
+
+    from packages.ai.registry import ModelRegistry, ModelRecord
+    reg = ModelRegistry()
+    rec = ModelRecord(name="detector", version="latest",
+                      path="/tmp/fake.engine", hash_sha256="a" * 64)
+    reg._models[("detector", "latest")] = rec
+    monkeypatch.setattr(ModelRegistry, "verify", lambda self, n, v: True)
+    monkeypatch.setitem(detectors._BACKENDS, "tensorrt",
+                       lambda *a, **k: (_ for _ in ()).throw(
+                           RuntimeError("tensorrt is not installed")))
+    with pytest.raises(RuntimeError, match="not installed"):
+        detectors.build_detector(S(), reg)
 
 
 # ── ANPR ───────────────────────────────────────────────────────────────────
