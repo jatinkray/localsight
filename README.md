@@ -74,17 +74,22 @@ as background services.
 pip install -r requirements.txt
 pip install pytest pytest-cov httpx numpy
 rm -f test_localvision.db
-pytest -q                       # 66 tests: auth, RBAC, SSRF, encryption, analytics, pipeline, API, live, alerts, ONNX detector
+pytest -q                       # 74 tests: auth, RBAC, SSRF, encryption, analytics, pipeline, API, live, alerts, ONNX detector, review regressions
 ```
 
 Coverage report: `pytest --cov=packages --cov=apps --cov-fail-under=50` (currently 74%).
+
+The suite includes regression tests from the architectural review
+(`docs/reviews/CODE_ANALYSIS_REPORT.md`): `Event.detail` round-trips through the
+ANPR/alerts/search endpoints, privacy-mask suppression, FK cascade deletes,
+detection write-gating, and live-stream stop/reap.
 
 ## CI/CD
 
 Every push to `main` and every PR runs a 9-job GitHub Actions pipeline:
 
 - **lint** — ruff + mypy
-- **unit tests** — pytest against SQLite (66 tests, ~17s)
+- **unit tests** — pytest against SQLite (74 tests, ~17s)
 - **integration** — pytest against PostgreSQL + pgvector
 - **dependency audit** — pip-audit (OSV/PyPI) + Safety (pyup.io)
 - **CodeQL SAST** — GitHub code scanning for Python
@@ -197,6 +202,19 @@ curl -s -X POST http://localhost:8000/api/alerts/routes \
    ffmpeg LL-HLS transcode of the camera substream; it returns the manifest at
    `/live-media/{camera_id}/index.m3u8`. The RTSP URL and credentials are never exposed.
 3. Point an HLS player at the manifest. The media gateway honors only valid tickets.
+4. Transcodes are lifecycle-managed: idle streams (no playback for
+   `LOCALVISION_LIVE_IDLE_TIMEOUT_SEC`, default 300 s) and streams older than
+   `LOCALVISION_LIVE_MAX_DURATION_SEC` (default 4 h) are reaped automatically;
+   `POST /api/live/{camera_id}/stop` stops one explicitly (dashboard control).
+
+## Privacy masks
+
+`PUT /api/cameras/{id}` accepts `privacy_masks`: normalized `{x, y, w, h}`
+rectangles designating zones excluded from ALL processing. Detections whose
+center falls inside a mask — or with ≥50% bbox overlap — are suppressed
+before tracking, so masked geometry produces no detections, no tracks, no
+snapshots, and no events. Masks are stored with the camera and enforced in
+the worker pipeline (`CameraPipeline._is_masked`).
 
 ## Analytics & BI
 
@@ -245,7 +263,7 @@ infrastructure/  docker, compose, nginx, monitoring
 docs/             architecture, security, operations, integrations, api
 scripts/          gen_env.py, capacity.py
 ui/               static dashboard (served at /)
-tests/            unit + security + integration (49 tests)
+tests/            unit + security + integration (74 tests)
 ```
 
 ## Status vs. plan
@@ -267,5 +285,8 @@ prediction only). Drop in YOLO/RT-DETR (ONNX), a plate detector+OCR, and a CLIP/
 via the `ModelRegistry` to reach production accuracy — the interfaces are unchanged.
 
 See `docs/` for architecture decision records, threat model, ERD, security controls, and
-the operations runbook. Market positioning and the phased roadmap are in
-`docs/PRODUCT_STRATEGY_2026.md`.
+the operations runbook. Operator-facing usage documentation is in
+`docs/USER_GUIDE.md`; engineering-agent orientation (invariants, workflow)
+is in `AGENTS.md`; the full architectural review with evidence and fix
+rationale is in `docs/reviews/CODE_ANALYSIS_REPORT.md`. Market positioning
+and the phased roadmap are in `docs/PRODUCT_STRATEGY_2026.md`.

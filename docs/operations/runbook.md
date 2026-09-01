@@ -48,8 +48,18 @@ embeddings) before any non-local deployment — never reuse the generated dev ke
 - `GET /health/live` — process alive.
 - `GET /health/ready` — DB + storage reachable.
 - `GET /api/system/health` — component statuses (authed).
-- `GET /api/system/metrics` — Prometheus exposition (authed).
-- `GET /api/live/streams` — active LL-HLS transcodes and their PIDs (authed).
+- `GET /api/system/metrics` — Prometheus exposition. Accepts either a user
+  session or a static scrape token: set `METRICS_SCRAPE_TOKEN` on the api
+  service and mirror it in `infrastructure/monitoring/prometheus.yml`
+  (`authorization.credentials`) — without the token every scrape 401s.
+- `GET /api/live/streams` — active LL-HLS transcodes, PIDs, and per-stream
+  `idle_sec` (authed).
+- `POST /api/live/{camera_id}/stop` — stop a transcode explicitly (authed).
+
+Live transcodes are lifecycle-managed: streams with no playback for
+`LOCALVISION_LIVE_IDLE_TIMEOUT_SEC` (default 300 s) or older than
+`LOCALVISION_LIVE_MAX_DURATION_SEC` (default 4 h) are terminated automatically
+by a reaper thread; the API also stops all transcodes on shutdown.
 
 ## Retention (configurable, automatic)
 | Data | Default |
@@ -59,12 +69,16 @@ embeddings) before any non-local deployment — never reuse the generated dev ke
 | Snapshots | 14 days |
 | Embeddings | 90 days |
 | Audit | 365 days |
+| Refresh tokens | purged after their 7-day expiry |
 
-Retention is enforced **automatically** by the worker: a background sweeper deletes
-expired `VideoSegment` rows **and their backing storage objects**, expired `Event`
-rows, and expired `Snapshot` rows every hour, using the per-policy env vars above.
-You do not need a separate cron job. All deletions are auditable. Per-camera overrides
-are supported via the camera `retention` JSON field.
+Retention is enforced **automatically** by the worker: a background sweeper
+deletes expired `VideoSegment` rows **and their backing storage objects**,
+expired `Event` rows, expired `Snapshot` rows (with storage objects), expired
+enrollment `PersonEmbedding` rows, expired `AuditLog` rows, and expired
+`RefreshToken` rows every hour, in chunked transactions (500 rows/commit) so
+long sweeps never hold locks. You do not need a separate cron job. All
+deletions are auditable. Per-camera overrides are supported via the camera
+`retention` JSON field.
 
 > Warning: if the worker is not running, retention is not applied and storage/DB grow.
 > Keep the worker process up (it also runs recording, analytics, and the alert sender).
@@ -158,6 +172,8 @@ Delivers to ntfy.sh. Configure `auth_token` for private topics.
   "cooldown_sec": 120
 }
 ```
+Port 465 is implicit TLS (SMTPS); 587 uses STARTTLS — both are handled
+automatically.
 
 ### Alert cooldown
 Every route has a `cooldown_sec` field. Within the cooldown window, the same
@@ -196,6 +212,11 @@ curl -X POST http://localhost:8000/api/alerts/test -H "Authorization: Bearer $TO
   with resource limits.
 - **Live stream PID 0 / not running**: ffmpeg may not be on PATH; check `/api/live/streams`
   returns `"running": false`. Install ffmpeg or check that the camera's substream URL is reachable.
+- **Prometheus scrape 401**: set `METRICS_SCRAPE_TOKEN` on the api service AND in
+  `infrastructure/monitoring/prometheus.yml` (they must match), then restart both.
+- **Live transcodes accumulate**: they shouldn't — idle streams are reaped at
+  `LOCALVISION_LIVE_IDLE_TIMEOUT_SEC`. If they persist, check the API logs for
+  reaper-thread errors; `POST /api/live/{id}/stop` stops one immediately.
 - **Event clip returns no segments**: the event has no overlapping `VideoSegment` rows in its
   time window. Check that recording is enabled (`RECORD_ENABLED=true`) and segments exist.
 
