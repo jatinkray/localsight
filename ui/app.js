@@ -10,10 +10,11 @@ import { toast } from "./core/toast.js";
 import { onView, navigate, start as startRouter } from "./core/router.js";
 import { openEventDrawer, requestClose } from "./views/event_drawer.js";
 import { wireLogin, resetLogin } from "./views/login.js";
-import { loadDashboard } from "./views/dashboard.js";
+import { loadDashboard, startAutoRefresh } from "./views/dashboard.js";
 import { loadCameras } from "./views/cameras.js";
 import { loadEvents, wireEventsView } from "./views/events.js";
 import { loadTimeline } from "./views/timeline.js";
+import { loadLive, wireLiveView } from "./views/live.js";
 import { loadPeople, wireEnrollForm } from "./views/people.js";
 import { loadAudit } from "./views/audit.js";
 
@@ -39,7 +40,23 @@ function closeMobileNav() {
 // ── view loaders (router calls these) ────────────────────────────────────
 onView("dashboard", () => {
   showPanels("dashboard");
-  loadDashboard($("#stat-cards"), $("#health"));
+  loadDashboard($("#stat-cards"), $("#health"), {
+    stripEl: $("#cam-strip"),
+    trendEl: $("#trend"),
+    recentEl: $("#recent-events"),
+    alertsEl: $("#alerts-feed"),
+  });
+});
+onView("live", (params) => {
+  showPanels("live");
+  loadLive($("#live-out"));
+  if (params.camera) {
+    // deep link: focus that camera's tile once rendered
+    setTimeout(() => {
+      const tile = document.querySelector(`.live-tile[data-cam-id="${CSS.escape(params.camera)}"]`);
+      if (tile) tile.scrollIntoView({ block: "center" });
+    }, 600);
+  }
 });
 onView("cameras", () => {
   showPanels("cameras");
@@ -96,6 +113,21 @@ async function boot() {
     $("#nav-toggle").setAttribute("aria-expanded", String(open));
   });
   wireEventsView($("#events-wrap"));
+  wireLiveView($("#live-out"), $("#live-toolbar"));
+  startAutoRefresh(() => {
+    // refresh the Overview whenever it's the visible view (auto-refresh
+    // pauses itself when the tab is hidden — visibilitychange listener
+    // inside dashboard.js)
+    const panel = document.querySelector('[data-panel="dashboard"]');
+    if (panel && !panel.classList.contains("hidden")) {
+      loadDashboard($("#stat-cards"), $("#health"), {
+        stripEl: $("#cam-strip"),
+        trendEl: $("#trend"),
+        recentEl: $("#recent-events"),
+        alertsEl: $("#alerts-feed"),
+      });
+    }
+  });
   $("#tl-go").addEventListener("click", () => {
     navigate("timeline", {
       date: $("#tl-date").value || undefined,
