@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     ai_inference_fps: int = 5
     ai_confidence_threshold: float = 0.45
     ai_iou_threshold: float = 0.50
+    # Motion gate: skip the (heavier) detection stage when the frame shows no
+    # motion delta. The reference motion detector has this built in; real ONNX
+    # backends save full inference cost on static scenes. Disabled = always
+    # run the detector.
     ai_motion_gate_enabled: bool = True
     ai_recognize_interval_sec: float = 2.0
     ai_similarity_threshold: float = 0.85
