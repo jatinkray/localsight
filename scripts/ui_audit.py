@@ -11,12 +11,38 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 VIEWS = ["dashboard", "cameras", "events", "timeline", "people", "audit"]
+
+
+def _admin_login(base: str, env_pw: str) -> str:
+    import urllib.request
+    body = json.dumps({"email": "admin@localvision.local", "password": env_pw}).encode()
+    r = urllib.request.Request(f"{base}/api/auth/login", data=body,
+                               headers={"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(r).read())["access_token"]
+
+
+def _provision(base: str, env_pw: str) -> tuple[str, str]:
+    """Throwaway SECURITY_OPERATOR per run. The audit's wrong-password probe
+    would otherwise lock the shared account (5 fails -> 15 min, by design)."""
+    import secrets
+    import urllib.request
+    token = _admin_login(base, env_pw)
+    email = f"audit{secrets.token_hex(3)}@example.com"
+    password = secrets.token_urlsafe(16) + "!Aa1"
+    body = json.dumps({"email": email, "password": password,
+                       "role": "SECURITY_OPERATOR", "full_name": "UI Audit"}).encode()
+    r = urllib.request.Request(f"{base}/api/users", data=body,
+                               headers={"Content-Type": "application/json",
+                                        "Authorization": f"Bearer {token}"})
+    urllib.request.urlopen(r).read()
+    return email, password
 
 
 def audit(base: str, email: str, password: str, out: Path, mobile: bool) -> dict:
@@ -109,16 +135,21 @@ def audit(base: str, email: str, password: str, out: Path, mobile: bool) -> dict
                     if page.locator("#events-table tbody tr").count()
                     else ""
                 )
-                # click "view" link — the only event drill-down affordance
-                link = page.locator("#events-table a").first
-                if link.count():
-                    with page.expect_popup() as pop:
-                        link.click()
-                    dp = pop.value
-                    dp.wait_for_timeout(1200)
-                    dp.screenshot(path=str(out / "04b-event-detail-raw-json.png"))
-                    findings["event_detail_raw"] = dp.url[:120]
-                    dp.close()
+                # Wave 1: row click opens the detail drawer (replaces the old
+                # raw-JSON popup — audit finding C-10). Probe it.
+                row = page.locator("#events-table tbody tr").first
+                if row.count():
+                    row.click()
+                    try:
+                        page.wait_for_selector(".drawer:not(.hidden)", timeout=4000)
+                        page.wait_for_timeout(800)
+                        page.screenshot(path=str(out / "04b-event-detail-drawer.png"))
+                        findings["event_drawer_opens"] = True
+                        findings["event_drawer_sections"] = page.locator(".drawer-section").count()
+                        page.keyboard.press("Escape")
+                        page.wait_for_selector(".drawer.hidden", state="attached", timeout=4000)
+                    except Exception:
+                        findings["event_drawer_opens"] = False
             if view == "timeline":
                 page.fill("#tl-date", "")
                 page.click("#tl-go")
@@ -142,7 +173,8 @@ def audit(base: str, email: str, password: str, out: Path, mobile: bool) -> dict
         # people enroll flow (form UX)
         open_nav_if_mobile()
         page.click('nav button[data-view="people"]')
-        page.fill("#person-label", "audit-temp-person")
+        import secrets as _s
+        page.fill("#person-label", f"audit-temp-{_s.token_hex(3)}")
         page.fill("#person-name", "Audit Temp")
         page.click("#person-form button[type=submit]")
         page.wait_for_timeout(900)
@@ -177,12 +209,22 @@ def audit(base: str, email: str, password: str, out: Path, mobile: bool) -> dict
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8777")
-    ap.add_argument("--email", default="admin@localvision.local")
-    ap.add_argument("--password", required=True)
+    ap.add_argument("--base", default=os.environ.get("LV_BASE", "http://127.0.0.1:8777"))
+    ap.add_argument("--email", default=None,
+                    help="defaults to a provisioned throwaway account")
+    ap.add_argument("--password", default=None)
     ap.add_argument("--out", default="ui_audit")
     ap.add_argument("--mobile", action="store_true")
     args = ap.parse_args()
-    result = audit(args.base, args.email, args.password, Path(args.out), args.mobile)
+    env_pw = ""
+    for line in Path(".env").read_text().splitlines():
+        if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
+            env_pw = line.split("=", 1)[1].strip().strip('"')
+            break
+    if args.email and args.password:
+        email, password = args.email, args.password
+    else:
+        email, password = _provision(args.base, env_pw)
+    result = audit(args.base, email, password, Path(args.out), args.mobile)
     (Path(args.out) / "findings.json").write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2)[:3000])

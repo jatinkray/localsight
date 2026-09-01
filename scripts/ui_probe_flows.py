@@ -16,6 +16,7 @@ Checks:
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import urllib.request
@@ -23,7 +24,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:8779"
+BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8779")
 ADMIN_EMAIL = "admin@localvision.local"
 ADMIN_PASSWORD_FILE = Path(".env")
 
@@ -45,13 +46,18 @@ def admin_login() -> str:
 
 
 def provision_probe_user() -> tuple[str, str]:
-    """Create a fresh ANALYST user for this probe run."""
+    """Create a fresh SECURITY_OPERATOR user for this probe run.
+
+    ANALYST lacks person:enroll, which the C-2/C-13 probes need (they
+    enroll payload persons). The old seeded DB masked this: a leftover
+    payload person made the XSS check pass on stale data.
+    """
     token = admin_login()
     email = f"probe-{secrets.token_hex(4)}@example.com"
     password = f"Probe-{secrets.token_hex(8)}!"  # > 12 chars (API minimum)
     body = json.dumps({
         "email": email, "password": password,
-        "role": "ANALYST", "full_name": "UI Probe",
+        "role": "SECURITY_OPERATOR", "full_name": "UI Probe",
     }).encode()
     r = urllib.request.Request(
         f"{BASE}/api/users", data=body,

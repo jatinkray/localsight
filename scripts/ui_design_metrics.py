@@ -10,14 +10,13 @@ Extracts quantifiable UX evidence across every view:
 from __future__ import annotations
 
 import json
-import sys
+import os
+import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE = "http://127.0.0.1:8779"
-EMAIL = "auditor@localvision.local"
-PASSWORD = sys.argv[1] if len(sys.argv) > 1 else "Audit-Passw0rd!2026"
+BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8779")
 OUT = Path("ui_audit/metrics")
 OUT.mkdir(parents=True, exist_ok=True)
 
@@ -68,6 +67,34 @@ JS_TARGETS = """
 """
 
 
+def _admin_token() -> str:
+    env = Path(".env").read_text()
+    pw = ""
+    for line in env.splitlines():
+        if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
+            pw = line.split("=", 1)[1].strip().strip('"')
+            break
+    body = json.dumps({"email": "admin@localvision.local", "password": pw}).encode()
+    r = urllib.request.Request(f"{BASE}/api/auth/login", data=body,
+                               headers={"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(r).read())["access_token"]
+
+
+def _provision() -> tuple[str, str]:
+    """Fresh SECURITY_OPERATOR per run (person:enroll for people-view data)."""
+    import secrets as _secrets
+    token = _admin_token()
+    email = f"metrics{_secrets.token_hex(3)}@example.com"
+    password = _secrets.token_urlsafe(16) + "!Aa1"
+    body = json.dumps({"email": email, "password": password,
+                       "role": "SECURITY_OPERATOR", "full_name": "Design Metrics"}).encode()
+    r = urllib.request.Request(f"{BASE}/api/users", data=body,
+                               headers={"Content-Type": "application/json",
+                                        "Authorization": f"Bearer {token}"})
+    urllib.request.urlopen(r).read()
+    return email, password
+
+
 def main() -> None:
     res: dict = {"base": BASE}
     with sync_playwright() as p:
@@ -78,8 +105,9 @@ def main() -> None:
         page.goto(BASE, wait_until="domcontentloaded")
         page.evaluate("() => localStorage.clear()")
         page.reload(wait_until="networkidle")
-        page.fill("#email", EMAIL)
-        page.fill("#password", PASSWORD)
+        email, password = _provision()
+        page.fill("#email", email)
+        page.fill("#password", password)
         page.click("button[type=submit]")
         page.wait_for_selector("#app:not(.hidden)", timeout=8000)
         page.wait_for_timeout(600)
@@ -145,8 +173,9 @@ def main() -> None:
         page.goto(BASE, wait_until="domcontentloaded")
         page.evaluate("() => localStorage.clear()")
         page.reload(wait_until="networkidle")
-        page.fill("#email", EMAIL)
-        page.fill("#password", PASSWORD)
+        email, password = _provision()
+        page.fill("#email", email)
+        page.fill("#password", password)
         page.click("button[type=submit]")
         page.wait_for_selector("#app:not(.hidden)", timeout=8000)
         page.wait_for_timeout(600)
