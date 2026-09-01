@@ -46,6 +46,7 @@
       <div class="brand"><span class="brand-mark" aria-hidden="true">◉</span> LocalVision</div>
       <nav id="nav" class="app-nav" aria-label="Primary">
         <button data-view="dashboard">Overview</button>
+        <button data-view="live">Live</button>
         <button data-view="cameras">Cameras</button>
         <button data-view="events">Events</button>
         <button data-view="timeline">Timeline</button>
@@ -61,7 +62,30 @@
     <main id="main">
       <section data-panel="dashboard" class="panel" aria-label="Overview">
         <div id="stat-cards" class="cards"></div>
+        <div id="cam-strip" class="card"></div>
         <div id="health" class="card"></div>
+        <div class="dash-two-col">
+          <div id="trend" class="card"></div>
+          <div id="recent-events" class="card"></div>
+        </div>
+        <div id="alerts-feed" class="card"></div>
+      </section>
+
+      <section data-panel="live" class="panel hidden" aria-label="Live view">
+        <div class="card">
+          <div class="panel-head">
+            <h2>Live view</h2>
+            <div class="live-toolbar" id="live-toolbar">
+              <span class="muted" role="group" aria-label="Grid layout">
+                <button class="ghost" data-role="layout" data-cols="1" aria-label="One tile">1×1</button>
+                <button class="ghost" data-role="layout" data-cols="2" aria-label="Four tiles">2×2</button>
+                <button class="ghost" data-role="layout" data-cols="3" aria-label="Nine tiles">3×3</button>
+              </span>
+              <button class="ghost" data-role="wall" aria-label="Toggle wall mode (F)">Wall mode</button>
+            </div>
+          </div>
+          <div id="live-out"></div>
+        </div>
       </section>
 
       <section data-panel="cameras" class="panel hidden" aria-label="Cameras">

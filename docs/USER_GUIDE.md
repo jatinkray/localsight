@@ -43,8 +43,9 @@ temporarily locked — try again in a few minutes" (the lock triggers after
 
 The web UI is a single-page dashboard served from the deployment URL:
 
-- **Overview** — stat cards (cameras online, events *today*, enrolled
-  identities, system health) with per-component health detail.
+- **Overview** — stat cards, camera strip, 24h event trend, recent events,
+  alert feed; auto-refreshes every 15 s while visible.
+- **Live** — camera grid with wall mode (see [Live view](#live-view)).
 - **Events** — detections and analytic events with filters by camera, time,
   identity status.
 - **Timeline** — a day of recording/presence coverage per camera (SVG ribbon).
@@ -129,19 +130,39 @@ defaults: recordings 7 days, events 30 days, snapshots 14 days, embeddings
 
 ## Live view
 
-Live view streams the camera's substream, transcoded locally to LL-HLS.
+Live view streams each camera's substream, transcoded locally to LL-HLS.
 The RTSP URL and camera credentials never reach your browser.
 
-1. Open Live in the dashboard and pick a camera (or call
-   `POST /api/live/ticket` then `GET /api/live/{camera_id}/play?ticket=...`).
-2. The player points at `/live-media/{camera_id}/index.m3u8`.
-3. Stop button (or `POST /api/live/{camera_id}/stop`) ends the transcode
+1. Open **Live** in the dashboard: every camera is a tile. Pick a layout
+   (1×1, 2×2, 3×3) from the toolbar — your choice is remembered for the tab.
+2. Each tile runs the secure ticket flow automatically
+   (`POST /api/live/ticket` → `GET /api/live/{camera_id}/play?ticket=...`);
+   the player points at `/live-media/{camera_id}/index.m3u8`.
+3. **Wall mode** (toolbar button or `F`) cycles the tiles fullscreen for NOC
+   displays; arrow keys step tiles, `Esc` exits.
+4. If a camera can't stream (offline, no transcoder available), the tile
+   says so — "Stream unavailable" — instead of showing a dead player.
+5. The ■ button (or `POST /api/live/{camera_id}/stop`) ends that transcode
    immediately.
 
 You don't need to stop streams manually — the server reaps transcodes that
 nobody has watched for 5 minutes (configurable) or that have run for 4 hours
 (hard ceiling), and it stops everything on restart. This keeps CPU
 proportional to actual viewing.
+
+## Overview (the NOC screen)
+
+The Overview refreshes itself every 15 seconds while visible and pauses
+when the tab is hidden:
+
+- **Camera strip** — one chip per camera with its status dot; click to jump
+  straight to that camera's live tile.
+- **Events — last 24 hours** — a bar sparkline of event volume.
+- **Recent events** — the latest five detections; click one to open its
+  detail drawer.
+- **Alert feed** — the most recent analytic (non-presence) events: rule
+  triggers and ANPR.
+- **Health** — per-component status with model names.
 
 ## Events, search & clips
 
