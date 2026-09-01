@@ -35,7 +35,8 @@ export function h(tag, props = {}, ...children) {
     if (key === "class") el.className = val;
     else if (key === "dataset") Object.assign(el.dataset, val);
     else if (key.startsWith("on") && typeof val === "function") {
-      el.addEventListener(key.slice(2), val);
+      // onClick -> "click"; DOM event names are lowercase.
+      el.addEventListener(key.slice(2).toLowerCase(), val);
     } else if (key === "text") el.textContent = val;
     else if (key === "html") {
       // Explicit opt-in for TRUSTED static markup only. Never user data.

@@ -24,6 +24,29 @@ let expiresAt = null;
 /** Refresh promise dedupe: concurrent 401s share one rotation. */
 let refreshInFlight = null;
 
+/** @type {{role: string, permissions: string[]}|null} /api/auth/me cache */
+let meCache = null;
+
+export function getMe() { return meCache; }
+
+export function can(perm) {
+  return Boolean(meCache && meCache.permissions.includes(perm));
+}
+
+async function fetchMe() {
+  try {
+    meCache = await api("/api/auth/me");
+  } catch {
+    meCache = null; // role-gated UI degrades to showing everything
+  }
+}
+
+/** Fetch and cache /api/auth/me (called right after session establishment). */
+export async function primeMe() {
+  if (!accessToken) return;
+  await fetchMe();
+}
+
 export function getAccessToken() { return accessToken; }
 
 export function hasSession() { return Boolean(accessToken || refreshToken); }
@@ -45,6 +68,7 @@ export function clearSession() {
   accessToken = null;
   refreshToken = null;
   expiresAt = null;
+  meCache = null;
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
@@ -182,6 +206,7 @@ export async function restoreSession() {
   if (accessToken || !refreshToken) return Boolean(accessToken);
   const ok = await tryRefresh();
   if (!ok) clearSession();
+  else await fetchMe(); // role-gated UI needs the role before first paint
   return ok;
 }
 
