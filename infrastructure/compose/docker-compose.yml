@@ -44,6 +44,9 @@ services:
       AI_IDENTITY_RECOGNITION_ENABLED: ${AI_IDENTITY_RECOGNITION_ENABLED:-false}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@localvision.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
+      # Static token Prometheus presents when scraping /api/system/metrics
+      # (must match infrastructure/monitoring/prometheus.yml credentials).
+      METRICS_SCRAPE_TOKEN: ${METRICS_SCRAPE_TOKEN:-}
     volumes:
       - storage:/app/data/storage
       - ./models:/app/models
