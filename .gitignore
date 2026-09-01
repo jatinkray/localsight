@@ -19,3 +19,6 @@ localvision.egg-info/
 .coverage
 coverage.xml
 htmlcov/
+# UI audit artifacts (regenerable via scripts/ui_audit.py et al.)
+ui_audit/
+.pw-browsers/

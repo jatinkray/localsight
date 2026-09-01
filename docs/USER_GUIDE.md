@@ -26,28 +26,36 @@ see `AGENTS.md`; for operations (deployment, retention, troubleshooting) see
 1. Browse to the deployment URL (the dashboard is served at `/`).
 2. Sign in with the account your administrator created (first boot creates
    the bootstrap admin from `BOOTSTRAP_ADMIN_EMAIL`/`BOOTSTRAP_ADMIN_PASSWORD`).
-3. Sessions are 15-minute access tokens with rotating refresh tokens — if a
-   session "logs out" while you're working, that's rotation working; log in again.
-4. Multi-factor authentication (TOTF-compatible authenticator apps) can be
+3. Sessions stay signed in while the tab is open: the dashboard silently
+   renews its 15-minute access token via a rotating refresh token. If your
+   session does end (tab closed past renewal, token revoked), you'll see a
+   "Session expired" notice on the sign-in screen — that's normal.
+4. If your account has MFA enabled, the code field appears automatically
+   after you enter your email and password.
+5. Multi-factor authentication (TOTP-compatible authenticator apps) can be
    enabled per-account under Account → MFA. Admin accounts should enable it.
 
-Failed logins lock the account for `LOCKOUT_MINUTES` after
-`MAX_LOGIN_ATTEMPTS` failures. Contact your administrator to unlock.
+Login errors are specific: "Incorrect email or password" vs. "Account
+temporarily locked — try again in a few minutes" (the lock triggers after
+`MAX_LOGIN_ATTEMPTS` failures for `LOCKOUT_MINUTES`).
 
 ## Dashboards at a glance
 
 The web UI is a single-page dashboard served from the deployment URL:
 
+- **Overview** — stat cards (cameras online, events *today*, enrolled
+  identities, system health) with per-component health detail.
 - **Events** — detections and analytic events with filters by camera, time,
   identity status.
-- **Live** — start/stop live views per camera (requires the `live:view`
-  permission).
-- **Cameras** — add/edit cameras, configure privacy masks and rules.
+- **Timeline** — a day of recording/presence coverage per camera (SVG ribbon).
+- **Cameras** — camera status, health, resolution, and last-seen.
+- **People** — identity enrollment and list.
 - **Audit** — every sensitive action (logins, exports, camera changes) with
   who/when/source IP (requires the `audit:view` permission).
 
-What you see depends on your role's permissions; endpoints you lack
-permission for return 403.
+Views show loading skeletons, empty states with next-step hints, and inline
+error states with Retry — no blank screens. What you see depends on your
+role's permissions; endpoints you lack permission for return 403.
 
 ## Managing cameras
 
@@ -146,8 +154,11 @@ proportional to actual viewing.
   overlapping the event window (requires `events:export`; the action is audited).
 - **Natural-language search**: `GET /api/analytics/search?q=person+by+the+gate`
   — a reference (deterministic) semantic search until a real VLM is staged.
-- **Timeline**: `GET /api/timeline?date=YYYY-MM-DD&camera_id=...` renders
-  merged recording intervals with presence events and analytic markers.
+- **Timeline**: the dashboard's Timeline view renders a day of activity per
+  camera as an SVG ribbon (recording coverage and presence periods); the same
+  data is available via `GET /api/timeline?date=YYYY-MM-DD&camera_id=...`.
+  Hover a segment for its time range; the view works under the strict CSP
+  the API serves (no inline styles), which the old timeline did not.
 
 Rule and ANPR events carry a `detail` object (direction, dwell, counts;
 for ANPR: the encrypted plate and its anonymized hash — see

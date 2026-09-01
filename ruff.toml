@@ -28,7 +28,7 @@ ignore = [
 
 [lint.per-file-ignores]
 "tests/*" = ["S101", "S105", "S106", "E501"]
-"scripts/*" = ["S101"]
+"scripts/*" = ["S101", "S310"]  # S310: audit/probe scripts target the hardcoded local BASE URL only
 
 [format]
 quote-style = "double"

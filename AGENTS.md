@@ -27,7 +27,7 @@ packages/observability/ metrics registry + structured logging
 ui/              vanilla-JS dashboard (served at /)
 infrastructure/  Dockerfile, compose stack, nginx, monitoring
 docs/            architecture, security, operations, integrations, api, reviews
-scripts/         gen_env.py, capacity.py
+scripts/         gen_env.py, capacity.py, seed_dev_data.py, ui_audit*.py (Playwright)
 tests/           unit + security + API + integration
 ```
 
@@ -50,28 +50,43 @@ tests/           unit + security + API + integration
      `_ALERT_DETAIL_KEYS` (worker) — ciphertext (`plate_enc`) never goes to
      third-party channels.
 
-3. **Subprocess safety**: FFmpeg/ffprobe are invoked with argv lists built
+3. **Frontend is CSP-native and XSS-proof by construction** (`ui/`):
+   - The server sends `style-src 'self'` — inline `style=` and `<style>` are
+     BLOCKED. Data-driven geometry (timeline, charts) must use **SVG
+     attributes** (`x`, `width`) or CSS classes, never inline styles. The old
+     timeline rendered 0-width segments for exactly this reason (audit C-1).
+   - No `innerHTML` with user/API data, ever. Build DOM via `ui/core/dom.js`
+     (`h()`, `svgEl()`, `render()`); the `html` prop is forbidden by design.
+     Stored XSS via person labels was live before this (audit C-2).
+   - No build step, no framework: ES modules served statically. Keep total
+     payload small; performance on edge hardware is a product feature.
+   - Session handling: access token in memory ONLY; refresh token in
+     `sessionStorage` (rotates server-side on every use). Never persist an
+     access token to `localStorage`. `ui/core/api.js` is the single fetch
+     layer — all API calls go through it (silent refresh-on-401 included).
+
+4. **Subprocess safety**: FFmpeg/ffprobe are invoked with argv lists built
    in-code (`packages/video/ffmpeg.py`), never `shell=True`, and every
    operator-supplied URL passes `validate_egress_url` first. Always
    `terminate()` **and** `wait()` — an unreaped child is a zombie (see
    `sources.py`, `recorder.py`).
 
-4. **Storage streaming**: large media moves through `put_stream` — never read
+5. **Storage streaming**: large media moves through `put_stream` — never read
    a recording into the heap. A 4 Mbps 300 s segment is ~150 MB; high-bitrate
    NVRs exceed 1 GB per segment.
 
-5. **Privacy masks are load-bearing**: `Camera.privacy_masks` (normalized
+6. **Privacy masks are load-bearing**: `Camera.privacy_masks` (normalized
    `{x,y,w,h}` rectangles) suppress detections whose center falls in the mask
    or with ≥50% bbox overlap (`CameraPipeline._is_masked`). If you touch the
    detection path, masks must still be applied BEFORE tracking, and
    `test_privacy_masks_suppress_detections` must pass.
 
-6. **Retention is compliance**: the worker's `_sweep_retention` enforces every
+7. **Retention is compliance**: the worker's `_sweep_retention` enforces every
    declared knob (recordings, events, snapshots, embeddings, audit) plus
    expired refresh tokens. New persistent data classes must join this sweep
    or get their own documented lifecycle.
 
-7. **Deletion cascades are DB-enforced**: person → embeddings (GDPR erasure),
+8. **Deletion cascades are DB-enforced**: person → embeddings (GDPR erasure),
    user → refresh tokens, camera → detections/tracks/events/segments. New
    child tables of existing entities get `ondelete=` on the FK plus storage
    cleanup where media objects are involved (see `delete_camera`).
@@ -80,7 +95,7 @@ tests/           unit + security + API + integration
 
 - **Dev**: SQLite, tests run against an in-memory-ish session-scoped app
   (`conftest.py`); `.venv` at repo root; `pytest tests/ -q` must pass
-  (currently 74 tests).
+  (currently 77 tests).
 - **Dev-parity FK enforcement**: `bootstrap.build` enables
   `PRAGMA foreign_keys=ON` on SQLite so cascade/integrity behavior matches
   PostgreSQL. Never remove this — it's what keeps dev bugs from hiding until
@@ -113,7 +128,7 @@ tests/           unit + security + API + integration
 
 ## Quality gates
 
-- `pytest tests/ -q` — all green (74+).
+- `pytest tests/ -q` — all green (77+).
 - `ruff check .` — `ruff.toml` defines the rule set; keep changed files clean,
   don't mass-reformat untouched files.
 - `mypy packages apps --ignore-missing-imports` — keep new code typed
@@ -149,3 +164,12 @@ implementations to be smarter; swap them via the interfaces.
 evidence, impact, and fix rationale for every recent change (F-01 … F-14,
 D-1 … D-7, M-1 … M-38). Read it before large refactors; it explains why the
 code looks the way it does now.
+
+`docs/reviews/UI_UX_AUDIT_AND_REDESIGN_PLAN.md` is the UI/UX counterpart:
+a Playwright-measured audit (findings C-1 … C-14) and the phased enterprise
+redesign. Wave 0 (trust repairs: XSS, CSP timeline, session refresh, design
+tokens, states) is DONE — later waves (event drawer, live view, masks,
+alerts, analytics) build on its `ui/core/` + `ui/views/` structure. The
+audit scripts reproduce any finding: `scripts/ui_audit.py`,
+`scripts/ui_design_metrics.py`, `scripts/ui_probe_flows.py` (see the report's
+Appendix B).
