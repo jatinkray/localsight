@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import secrets
 
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from apps.api.bootstrap import Runtime
-from apps.api.dependencies import get_current_user, get_runtime
+from apps.api.dependencies import get_current_user, get_db, get_runtime
 from packages.domain.models import User
 from packages.observability.metrics import metrics
 
@@ -71,24 +73,25 @@ def system_health(request: Request, _: User = Depends(get_current_user),
     }
 
 
-@router.get("/api/system/metrics")
-def system_metrics(request: Request, rt: Runtime = Depends(get_runtime)):
-    """Prometheus scrape endpoint.
+def _metrics_auth(request: Request, db: Session = Depends(get_db)) -> None:
+    """Scrape-token OR user-session auth for /api/system/metrics.
 
-    Accepts EITHER a static bearer token matching METRICS_SCRAPE_TOKEN
-    (Prometheus servers have no login flow) OR a valid user session
-    (dashboard use). Without the token path, every scrape 401s and the
-    shipped monitoring stack silently reports nothing.
+    A static bearer token (METRICS_SCRAPE_TOKEN) is accepted for Prometheus,
+    which has no login flow; anything else must be a valid user session.
+    get_current_user MUST be called with a real Session (its second parameter
+    is a Depends() marker when invoked outside DI) — calling it bare was the
+    cause of the 500 on every user-session metrics request.
     """
-    import secrets as _secrets
-
     expected = os.environ.get("METRICS_SCRAPE_TOKEN", "")
     auth = request.headers.get("Authorization", "")
-    if expected and auth.startswith("Bearer ") and _secrets.compare_digest(auth[7:], expected):
-        return _render_metrics(rt)
-    # No/incorrect scrape token: require a valid user session via the standard
-    # dependency (raises 401 itself on failure).
-    get_current_user(request)
+    if expected and auth.startswith("Bearer ") and secrets.compare_digest(auth[7:], expected):
+        return
+    get_current_user(request, db)  # raises 401 itself on failure
+
+
+@router.get("/api/system/metrics", dependencies=[Depends(_metrics_auth)])
+def system_metrics(rt: Runtime = Depends(get_runtime)):
+    """Prometheus scrape endpoint (auth handled by _metrics_auth)."""
     return _render_metrics(rt)
 
 

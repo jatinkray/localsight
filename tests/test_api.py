@@ -152,3 +152,61 @@ def test_from_nvr_blocks_metadata_ip(client, admin_auth):
         "nvr_ip": "169.254.169.254", "channel_count": 1,
     }, headers=admin_auth)
     assert res.status_code == 400
+
+
+def test_system_metrics_with_user_session(client, admin_auth):
+    """Regression (UI audit C-11): /api/system/metrics 500'd for every user
+    session because get_current_user was called as a plain function — its
+    `db` parameter was a Depends() marker, not a Session. The scrape-token
+    path masked it from Prometheus, so dashboards hit the 500 directly."""
+    res = client.get("/api/system/metrics", headers=admin_auth)
+    assert res.status_code == 200, res.text
+    assert "text/plain" in res.headers["content-type"]
+    # The registry may be empty in tests; a 200 text/plain body is the contract.
+    assert res.text is not None
+
+
+def test_system_metrics_rejects_anonymous(client):
+    res = client.get("/api/system/metrics")
+    assert res.status_code == 401
+
+
+def test_dashboard_summary_counts_today_only(client, admin_auth):
+    """Regression (UI audit C-9): the dashboard previously faked "events
+    today" from /api/events?limit=1 total (= ALL events ever). The summary
+    endpoint must count from local midnight and split unknown identities."""
+    from datetime import datetime, timedelta
+
+    from packages.domain.models import Camera
+    from packages.domain.models import Event as EventModel
+
+    rt = client.app.state.runtime
+    s = rt.SessionLocal()
+    try:
+        cam = s.query(Camera).first()
+        if cam is None:
+            cam = Camera(id="cam-summary-1", name="Summary Cam", status="ONLINE")
+            s.add(cam)
+            s.flush()
+        now = datetime.now(dt.UTC)
+        for i, delta in enumerate((timedelta(minutes=-30), timedelta(hours=-30))):
+            s.add(EventModel(
+                id=f"ev-sum-{i}", camera_id=cam.id,
+                event_type="presence", identity_status="unknown",
+                timestamp_start=now + delta, timestamp_end=now + delta + timedelta(seconds=30),
+                bbox={"x": 0, "y": 0, "w": 0.1, "h": 0.1}, confidence=0.5,
+            ))
+        s.commit()
+    finally:
+        s.close()
+
+    res = client.get("/api/dashboard/summary", headers=admin_auth)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    # today's event counted; yesterday's NOT (the old bug counted all-time)
+    assert body["events_today"]["total"] == 1
+    assert body["events_today"]["unknown"] == 1
+    assert body["cameras"]["total"] >= 1
+    assert body["cameras"]["online"] >= 1
+    assert isinstance(body["cameras"]["per_camera"], list)
+    assert set(body["cameras"]) >= {"online", "degraded", "offline", "per_camera"}
