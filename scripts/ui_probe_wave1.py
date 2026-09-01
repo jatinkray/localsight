@@ -17,11 +17,15 @@ lockout incident) and asserts:
 import json
 import os
 import secrets
+import ssl
 import sys
 import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+if os.environ.get("LV_INSECURE_TLS"):
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8781")
 ADMIN_EMAIL = "admin@localvision.local"
@@ -29,12 +33,12 @@ OUT = Path("ui_audit/wave1")
 
 
 def admin_login() -> str:
-    env = Path(".env").read_text()
-    pw = ""
-    for line in env.splitlines():
-        if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
-            pw = line.split("=", 1)[1].strip().strip('"')
-            break
+    pw = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not pw:
+        for line in Path(".env").read_text().splitlines():
+            if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
+                pw = line.split("=", 1)[1].strip().strip('"')
+                break
     body = json.dumps({"email": ADMIN_EMAIL, "password": pw}).encode()
     r = urllib.request.Request(f"{BASE}/api/auth/login", data=body,
                                headers={"Content-Type": "application/json"})
@@ -64,7 +68,9 @@ def main() -> int:
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
-        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+        ctx = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            ignore_https_errors=bool(os.environ.get("LV_INSECURE_TLS")))
         page = ctx.new_page()
         page.on("console", lambda m: console_errors.append({"type": m.type, "text": m.text})
                if m.type == "error" else None)

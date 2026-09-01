@@ -19,10 +19,14 @@ import json
 import os
 import re
 import secrets
+import ssl
 import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+if os.environ.get("LV_INSECURE_TLS"):
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8779")
 ADMIN_EMAIL = "admin@localvision.local"
@@ -31,9 +35,9 @@ ADMIN_PASSWORD_FILE = Path(".env")
 
 def admin_login() -> str:
     """Login as the seeded bootstrap admin to provision the probe user."""
-    # Read the real password from .env (never hardcode dev secrets here).
-    pw = None
-    if ADMIN_PASSWORD_FILE.exists():
+    # Admin password: env var first (demo stacks have their own), else .env.
+    pw = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD")
+    if not pw and ADMIN_PASSWORD_FILE.exists():
         for line in ADMIN_PASSWORD_FILE.read_text().splitlines():
             if line.startswith("BOOTSTRAP_ADMIN_PASSWORD="):
                 pw = line.split("=", 1)[1].strip().strip('"')
@@ -88,7 +92,9 @@ def login(page) -> None:
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+    ctx = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            ignore_https_errors=bool(os.environ.get("LV_INSECURE_TLS")))
     page = ctx.new_page()
 
     # ── 1. session survives reload (C-6 core promise) ─────────────────
