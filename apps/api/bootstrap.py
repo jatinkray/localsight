@@ -52,6 +52,15 @@ def build(settings: Settings) -> Runtime:
 
     connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
     engine = create_engine(settings.database_url, future=True, connect_args=connect_args)
+    if settings.database_url.startswith("sqlite"):
+        # Dev parity with production: SQLite ignores FK constraints unless this
+        # pragma is enabled, so cascade deletes "worked" in dev while raising
+        # IntegrityError on PostgreSQL. Turn enforcement on everywhere.
+        from sqlalchemy import event
+
+        @event.listens_for(engine, "connect")
+        def _fk_on(dbapi_connection, _record):  # pragma: no cover - trivial
+            dbapi_connection.execute("PRAGMA foreign_keys=ON")
     SessionLocal = sessionmaker(bind=engine, future=True)
 
     crypto = CryptoBox(settings.master_encryption_key)
@@ -91,19 +100,25 @@ def _ensure_columns(rt: Runtime) -> None:
     column added to a pre-existing table (e.g. `cameras.rules`) would otherwise be
     missing on an upgraded database and crash the camera worker. This guards against
     that without requiring Alembic for a single additive column.
+
+    Each statement runs in its own short transaction so one real failure (not
+    "already exists") cannot poison the rest; "duplicate column" is the only
+    swallowed error, matched by message rather than blanket `except Exception`.
     """
     from sqlalchemy import text
 
     added = [
         "ALTER TABLE cameras ADD COLUMN rules JSON",
         "ALTER TABLE alert_routes ADD COLUMN cooldown_sec INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE events ADD COLUMN detail JSON",
     ]
-    with rt.engine.begin() as conn:
-        for stmt in added:
-            try:
+    for stmt in added:
+        try:
+            with rt.engine.begin() as conn:
                 conn.execute(text(stmt))
-            except Exception:  # noqa: BLE001 - already present (or unsupported type)
-                pass
+        except Exception as exc:  # noqa: BLE001 - already present (or unsupported type)
+            if "duplicate column" not in str(exc).lower() and "already exists" not in str(exc).lower():
+                raise
 
 
 def seed(rt: Runtime) -> None:

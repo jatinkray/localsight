@@ -81,7 +81,9 @@ class RolePermission(Base):
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     jti: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
@@ -118,6 +120,7 @@ class Camera(Base):
     fps: Mapped[int] = mapped_column(Integer, default=0)
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     # JSON: list of {x,y,w,h} rectangles excluded from processing (privacy masks).
+    # Suppressed by CameraPipeline when center-in-mask or >=50% bbox overlap.
     privacy_masks: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # Per-camera retention overrides (days); null = global policy.
     retention: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -131,7 +134,9 @@ class Camera(Base):
 class Stream(Base):
     __tablename__ = "streams"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"), index=True)
+    camera_id: Mapped[str] = mapped_column(
+        ForeignKey("cameras.id", ondelete="CASCADE"), index=True
+    )
     kind: Mapped[str] = mapped_column(String(16))  # main | sub
     url_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolution: Mapped[str] = mapped_column(String(32), default="")
@@ -148,12 +153,19 @@ class Person(Base):
     status: Mapped[str] = mapped_column(String(16), default="known")  # known | disabled
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Deleting a person (GDPR erasure) removes their enrollment embeddings —
+    # the biometric data class must not outlive its subject.
+    embeddings: Mapped[list["PersonEmbedding"]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class PersonEmbedding(Base):
     __tablename__ = "person_embeddings"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    person_id: Mapped[str] = mapped_column(ForeignKey("persons.id"), index=True)
+    person_id: Mapped[str] = mapped_column(
+        ForeignKey("persons.id", ondelete="CASCADE"), index=True
+    )
     # Encrypted float vector (CryptoBox). Carries its model version.
     embedding_enc: Mapped[str] = mapped_column(Text)
     model_version: Mapped[str] = mapped_column(String(64), index=True)
@@ -166,7 +178,9 @@ class PersonEmbedding(Base):
 class Detection(Base):
     __tablename__ = "detections"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"), index=True)
+    camera_id: Mapped[str] = mapped_column(
+        ForeignKey("cameras.id", ondelete="CASCADE"), index=True
+    )
     track_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     frame_ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
     label: Mapped[str] = mapped_column(String(32), default="person")
@@ -178,8 +192,12 @@ class Detection(Base):
 class Track(Base):
     __tablename__ = "tracks"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # camera-01-track-1842
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"), index=True)
-    identity_id: Mapped[str | None] = mapped_column(ForeignKey("persons.id"), nullable=True, index=True)
+    camera_id: Mapped[str] = mapped_column(
+        ForeignKey("cameras.id", ondelete="CASCADE"), index=True
+    )
+    identity_id: Mapped[str | None] = mapped_column(
+        ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     identity_status: Mapped[str] = mapped_column(String(16), default="unknown")  # known/unknown/uncertain
     first_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True))
     last_seen: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -192,15 +210,23 @@ class Track(Base):
 class Event(Base):
     __tablename__ = "events"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"), index=True)
+    camera_id: Mapped[str] = mapped_column(
+        ForeignKey("cameras.id", ondelete="CASCADE"), index=True
+    )
     track_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    identity_id: Mapped[str | None] = mapped_column(ForeignKey("persons.id"), nullable=True, index=True)
+    identity_id: Mapped[str | None] = mapped_column(
+        ForeignKey("persons.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     identity_status: Mapped[str] = mapped_column(String(16), default="unknown")
     event_type: Mapped[str] = mapped_column(String(32), default="presence", index=True)
     timestamp_start: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
     timestamp_end: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     bbox: Mapped[dict] = mapped_column(JSON)
+    # Structured, non-indexed context for analytic events: rules carry
+    # {direction, dwell_sec, count, zone}, ANPR carries {plate_enc, plate_hash}.
+    # Must stay JSON-safe; sensitive values are encrypted by callers.
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     snapshot_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     video_segment_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -209,7 +235,9 @@ class Event(Base):
 class VideoSegment(Base):
     __tablename__ = "video_segments"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"), index=True)
+    camera_id: Mapped[str] = mapped_column(
+        ForeignKey("cameras.id", ondelete="CASCADE"), index=True
+    )
     storage_key: Mapped[str] = mapped_column(Text)  # StorageProvider key
     storage_backend: Mapped[str] = mapped_column(String(16), default="local")
     start_ts: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -222,9 +250,13 @@ class VideoSegment(Base):
 class Snapshot(Base):
     __tablename__ = "snapshots"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"), index=True)
+    camera_id: Mapped[str] = mapped_column(
+        ForeignKey("cameras.id", ondelete="CASCADE"), index=True
+    )
     track_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    event_id: Mapped[str | None] = mapped_column(ForeignKey("events.id"), nullable=True)
+    event_id: Mapped[str | None] = mapped_column(
+        ForeignKey("events.id", ondelete="SET NULL"), nullable=True
+    )
     storage_key_enc: Mapped[str] = mapped_column(Text)  # encrypted key
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
