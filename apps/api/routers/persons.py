@@ -8,7 +8,7 @@ surveillance footage.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,12 +22,18 @@ router = APIRouter(prefix="/api/persons", tags=["persons"])
 
 @router.get("", dependencies=[Depends(require_permission("person:view"))])
 def list_persons(db: Session = Depends(get_db)):
+    from sqlalchemy import func
     rows = db.execute(select(Person).order_by(Person.label)).scalars().all()
-    return [
-        {"id": p.id, "label": p.label, "display_name": p.display_name,
-         "status": p.status, "created_at": p.created_at.isoformat()}
-        for p in rows
-    ]
+    out = []
+    for p in rows:
+        enrolled = db.execute(
+            select(func.count(PersonEmbedding.id))
+            .where(PersonEmbedding.person_id == p.id)
+        ).scalar() or 0
+        out.append({"id": p.id, "label": p.label, "display_name": p.display_name,
+                    "status": p.status, "created_at": p.created_at.isoformat(),
+                    "faces_enrolled": enrolled})
+    return out
 
 
 @router.post("", dependencies=[Depends(require_permission("person:enroll"))])
@@ -58,6 +64,33 @@ def delete_person(person_id: str, request: Request, db: Session = Depends(get_db
                 request_id=getattr(request.state, "request_id", "-"))
     db.commit()
     return {"ok": True}
+
+
+@router.get("/{person_id}/references", dependencies=[Depends(require_permission("person:view"))])
+def list_references(person_id: str, db: Session = Depends(get_db)):
+    """Embedding metadata for a person's reference enrollments.
+
+    Privacy-by-design honesty: the uploaded IMAGE BYTES are not retained —
+    only the encrypted embedding and its provenance. The UI surfaces this
+    explicitly (no fake "photo gallery").
+    """
+    person = db.get(Person, person_id)
+    if not person:
+        raise HTTPException(status_code=404, detail="person not found")
+    rows = db.execute(
+        select(PersonEmbedding).where(PersonEmbedding.person_id == person_id)
+        .order_by(PersonEmbedding.created_at.desc())
+    ).scalars().all()
+    return {
+        "person_id": person_id,
+        "image_bytes_retained": False,
+        "references": [
+            {"id": r.id, "model_version": r.model_version, "dimension": r.dimension,
+             "quality_score": r.quality_score,
+             "created_at": r.created_at.isoformat()}
+            for r in rows
+        ],
+    }
 
 
 @router.post("/{person_id}/references", dependencies=[Depends(require_permission("person:enroll"))])
