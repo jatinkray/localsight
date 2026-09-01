@@ -44,14 +44,18 @@ def build_args(
 
 def open_decoder(args: list[str]) -> subprocess.Popen:
     """Launch FFmpeg as a confined subprocess (no shell, no inheritance of fds
-    beyond stdout). Raises SecurityError on spawn failure."""
+    beyond stdout). Raises SecurityError on spawn failure.
+
+    stderr goes to DEVNULL: it is never drained, and a chatty ffmpeg on a
+    full 64 KB stderr pipe would block the process mid-encode (a classic
+    subprocess deadlock). Errors surface via exit code and the empty stdout.
+    """
     try:
         return subprocess.Popen(
             args,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
-            bufsize=0,
         )
     except (OSError, ValueError) as exc:
         raise SecurityError(f"failed to launch decoder: {exc}") from exc

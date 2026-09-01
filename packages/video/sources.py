@@ -74,4 +74,14 @@ class FFmpegFrameSource(FrameSource):
                     break
                 yield (buf, dt.datetime.now(dt.timezone.utc))
         finally:
+            # Terminate AND wait: a terminate without wait leaves the exited
+            # ffmpeg as a zombie on every generator close (client disconnect,
+            # camera restart), pinning a PID slot until the worker restarts.
             proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001 - best-effort reap
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
