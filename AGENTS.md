@@ -58,7 +58,9 @@ tests/           unit + security + API + integration
    - No `innerHTML` with user/API data, ever. Build DOM via `ui/core/dom.js`
      (`h()`, `svgEl()`, `render()`); the `html` prop is forbidden by design.
      Stored XSS via person labels was live before this (audit C-2).
-   - No build step, no framework: ES modules served statically. Keep total
+   - No build step, no framework: ES modules served statically. One allowed
+     third-party asset: ui/vendor/hls.light.min.js (LL-HLS in Chromium,
+     lazy-loaded only on Live view; Safari uses native HLS). Keep total
      payload small; performance on edge hardware is a product feature.
    - Session handling: access token in memory ONLY; refresh token in
      `sessionStorage` (rotates server-side on every use). Never persist an
@@ -167,9 +169,10 @@ code looks the way it does now.
 
 `docs/reviews/UI_UX_AUDIT_AND_REDESIGN_PLAN.md` is the UI/UX counterpart:
 a Playwright-measured audit (findings C-1 … C-14) and the phased enterprise
-redesign. Wave 0 (trust repairs: XSS, CSP timeline, session refresh, design
-tokens, states) is DONE — later waves (event drawer, live view, masks,
-alerts, analytics) build on its `ui/core/` + `ui/views/` structure. The
+redesign. Waves 0 (trust repairs) and 1 (investigation loop) are DONE;
+Wave 2 (Monitor: live grid + wall mode, auto-refreshing overview) builds on
+their `ui/core/` + `ui/views/` structure. Later waves (manage screens,
+analytics) follow the same pattern. The
 audit scripts reproduce any finding: `scripts/ui_audit.py`,
 `scripts/ui_design_metrics.py`, `scripts/ui_probe_flows.py` (see the report's
 Appendix B).
