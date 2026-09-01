@@ -333,6 +333,11 @@ curl -X POST http://localhost:8000/api/alerts/test -H "Authorization: Bearer $TO
 ## Media
 | Method | Path | Permission |
 |--------|------|-------------|
-| GET | `/api/video/{key}?exp=&sig=` | `video:view` (HMAC-signed, expiring) |
+| GET | `/api/video/{key}?exp=&sig=` | URL signature itself (HMAC-signed, expiring ≤300 s, scoped to one object) |
+
+> Media URLs are consumed by `<img>`/`<video>` tags, which cannot send an
+> `Authorization` header — so the signature is the authorization. URLs are
+> only issued by permissioned endpoints (`events:view`/`events:export`),
+> each issuance audited where applicable.
 
 Full interactive docs: `GET /docs` (FastAPI Swagger UI) when running.

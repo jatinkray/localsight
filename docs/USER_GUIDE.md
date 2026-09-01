@@ -145,20 +145,25 @@ proportional to actual viewing.
 
 ## Events, search & clips
 
-- **Browse**: `GET /api/events` with filters (camera, identity, status,
-  time range, confidence floor).
-- **Event detail**: `GET /api/events/{id}` — includes short-lived signed
+- **Browse**: the dashboard's Events view (or `GET /api/events`) with
+  filters (camera, identity status, time range, confidence floor). Filters
+  live in the URL — copy it to hand a colleague the exact same view.
+- **Investigate**: click any event row (or press ↑/↓ and Enter) to open the
+  detail drawer — snapshot with detection box, clip playback, camera and
+  identity context, and **Export evidence**: an audited, signed, 5-minute
+  download link copied to your clipboard. Export requires an operator role
+  (`events:export`); every export lands in the audit log.
+- **Event detail API**: `GET /api/events/{id}` — includes short-lived signed
   URLs to the snapshot and any recorded segment (default 300 s expiry;
   links are HMAC-signed and expire — don't archive them).
 - **Clips**: `GET /api/events/{id}/clip` assembles every recording segment
   overlapping the event window (requires `events:export`; the action is audited).
 - **Natural-language search**: `GET /api/analytics/search?q=person+by+the+gate`
   — a reference (deterministic) semantic search until a real VLM is staged.
-- **Timeline**: the dashboard's Timeline view renders a day of activity per
-  camera as an SVG ribbon (recording coverage and presence periods); the same
-  data is available via `GET /api/timeline?date=YYYY-MM-DD&camera_id=...`.
-  Hover a segment for its time range; the view works under the strict CSP
-  the API serves (no inline styles), which the old timeline did not.
+- **Timeline**: the Timeline view renders a day of activity per camera as an
+  SVG ribbon; hover for the wall-clock time, click to jump into Events for
+  that camera. The same data is available via
+  `GET /api/timeline?date=YYYY-MM-DD&camera_id=...`.
 
 Rule and ANPR events carry a `detail` object (direction, dwell, counts;
 for ANPR: the encrypted plate and its anonymized hash — see

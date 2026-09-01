@@ -1,24 +1,23 @@
-// LocalVision app shell — ES-module orchestrator (~140 lines).
+// LocalVision app shell — ES-module orchestrator.
 //
-// Wave-0 rebuild of the original 164-line IIFE. View logic lives in
-// ui/views/*; session in ui/core/api.js; DOM safety in ui/core/dom.js.
-// The old styles.css is retired (tokens/base/components replace it).
+// Wave 1: the hash router (core/router.js) owns view state. Views register
+// loaders; navigation = hash change; back/forward and shareable URLs work.
+// The shell only wires chrome (nav, login, logout) and boots the session.
 
 import { $ } from "./core/dom.js";
 import { api, restoreSession, logout as apiLogout, hasSession, startRefreshLoop, onAuthEvent } from "./core/api.js";
 import { toast } from "./core/toast.js";
+import { onView, navigate, start as startRouter } from "./core/router.js";
+import { openEventDrawer, requestClose } from "./views/event_drawer.js";
 import { wireLogin, resetLogin } from "./views/login.js";
 import { loadDashboard } from "./views/dashboard.js";
 import { loadCameras } from "./views/cameras.js";
-import { loadEvents, wireEventsPager } from "./views/events.js";
+import { loadEvents, wireEventsView } from "./views/events.js";
 import { loadTimeline } from "./views/timeline.js";
 import { loadPeople, wireEnrollForm } from "./views/people.js";
 import { loadAudit } from "./views/audit.js";
 
-let currentView = "dashboard";
-
-function show(view) {
-  currentView = view;
+function showPanels(view) {
   document.querySelectorAll("#nav button").forEach((b) => {
     b.classList.toggle("active", b.dataset.view === view);
     if (b.dataset.view === view) b.setAttribute("aria-current", "page");
@@ -27,34 +26,53 @@ function show(view) {
   document.querySelectorAll(".panel").forEach((p) =>
     p.classList.toggle("hidden", p.dataset.panel !== view));
   closeMobileNav();
-
-  if (view === "dashboard") loadDashboard($("#stat-cards"), $("#health"));
-  if (view === "cameras") loadCameras($("#cameras-list"));
-  if (view === "events") loadEvents($("#events-wrap"), { resetOffset: true });
-  if (view === "timeline") loadTimeline($("#timeline-out"), timelineParams());
-  if (view === "people") loadPeople($("#people-list"));
-  if (view === "audit") loadAudit($("#audit-list"));
-}
-
-function timelineParams() {
-  return {
-    date: $("#tl-date").value || new Date().toISOString().slice(0, 10),
-    cameraId: $("#tl-camera").value.trim() || undefined,
-  };
 }
 
 function closeMobileNav() {
   const nav = $("#nav");
-  if (nav.classList.contains("open")) {
+  if (nav && nav.classList.contains("open")) {
     nav.classList.remove("open");
     $("#nav-toggle").setAttribute("aria-expanded", "false");
   }
 }
 
+// ── view loaders (router calls these) ────────────────────────────────────
+onView("dashboard", () => {
+  showPanels("dashboard");
+  loadDashboard($("#stat-cards"), $("#health"));
+});
+onView("cameras", () => {
+  showPanels("cameras");
+  loadCameras($("#cameras-list"));
+});
+onView("events", (params, eventId) => {
+  showPanels("events");
+  loadEvents($("#events-wrap"), { resetOffset: true, params });
+  if (eventId) openEventDrawer(eventId, { onClose: () => navigate("events", params) });
+  else requestClose(); // landing on events plain: ensure drawer shut
+});
+onView("timeline", (params) => {
+  showPanels("timeline");
+  if (params.date) $("#tl-date").value = params.date;
+  if (params.camera) $("#tl-camera").value = params.camera;
+  loadTimeline($("#timeline-out"), {
+    date: params.date || $("#tl-date").value || new Date().toISOString().slice(0, 10),
+    cameraId: params.camera || $("#tl-camera").value.trim() || undefined,
+  });
+});
+onView("people", () => {
+  showPanels("people");
+  loadPeople($("#people-list"));
+});
+onView("audit", () => {
+  showPanels("audit");
+  loadAudit($("#audit-list"));
+});
+
 function enterApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  show("dashboard");
+  startRouter(); // resolve #/ — lands on the URL's view (or dashboard)
 }
 
 function leaveApp({ notice = null } = {}) {
@@ -66,25 +84,27 @@ function leaveApp({ notice = null } = {}) {
 
 // ── boot ────────────────────────────────────────────────────────────────
 async function boot() {
-  // Session restore first (C-6): refresh-token survival across reload.
   const restored = hasSession() ? await restoreSession() : false;
 
   wireLogin($("#login-form"), enterApp);
   document.querySelectorAll("#nav button").forEach((b) =>
-    b.addEventListener("click", () => show(b.dataset.view)));
+    b.addEventListener("click", () => navigate(b.dataset.view)));
   $("#logout").addEventListener("click", async () => { await apiLogout(); leaveApp(); });
   $("#nav-toggle").addEventListener("click", () => {
     const nav = $("#nav");
     const open = nav.classList.toggle("open");
     $("#nav-toggle").setAttribute("aria-expanded", String(open));
   });
-  $("#ev-search").addEventListener("click", () => loadEvents($("#events-wrap"), { resetOffset: true }));
-  wireEventsPager($("#events-wrap"));
-  $("#tl-go").addEventListener("click", () => loadTimeline($("#timeline-out"), timelineParams()));
+  wireEventsView($("#events-wrap"));
+  $("#tl-go").addEventListener("click", () => {
+    navigate("timeline", {
+      date: $("#tl-date").value || undefined,
+      camera: $("#tl-camera").value.trim() || undefined,
+    });
+  });
   wireEnrollForm($("#person-form"), $("#people-list"));
-  $("#audit-load").addEventListener("click", () => loadAudit($("#audit-list")));
+  $("#audit-load").addEventListener("click", () => navigate("audit"));
 
-  // Session events: expire with a notice (never a silent dump — C-6).
   onAuthEvent((ev) => {
     if (ev.type === "auth:expired") leaveApp({ notice: "Session expired — please sign in again." });
     if (ev.type === "auth:restored") toast("Session renewed", { tone: "ok", timeout: 2000 });
@@ -92,7 +112,7 @@ async function boot() {
 
   if (restored) {
     enterApp();
-    startRefreshLoop(); // proactive rotation before expiry
+    startRefreshLoop();
   } else {
     $("#login").classList.remove("hidden");
   }
