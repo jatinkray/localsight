@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from apps.api.bootstrap import Runtime
-from apps.api.dependencies import get_db, get_runtime, require_permission
+from apps.api.dependencies import get_db, require_permission
 from packages.ai.vlm import ReferenceSceneEmbedder, SemanticSearch
 from packages.domain.analytics import (
     dwell_time,
@@ -23,9 +22,50 @@ from packages.domain.analytics import (
     occupancy_trend,
     people_counting,
 )
-from packages.domain.models import Event
+from packages.domain.models import Camera, Event, Person
 
 router = APIRouter(prefix="/api", tags=["analytics"])
+
+
+@router.get("/dashboard/summary", dependencies=[Depends(require_permission("events:view"))])
+def dashboard_summary(db: Session = Depends(get_db)):
+    """One request for the Overview screen's stat cards.
+
+    The dashboard previously faked "events today" from /api/events?limit=1's
+    total (which is ALL events ever) and issued 4 separate requests. This
+    endpoint computes the real numbers in one round-trip: cameras by status,
+    today's event count (with unknown-identity split), enrolled identities,
+    and the per-camera online breakdown for the status strip.
+    """
+    now = dt.datetime.now(dt.UTC)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    cameras = db.execute(select(Camera)).scalars().all()
+    cam_status = {"online": 0, "degraded": 0, "offline": 0}
+    per_camera = []
+    for c in sorted(cameras, key=lambda x: x.name.lower()):
+        if c.status == "ONLINE":
+            cam_status["online"] += 1
+        elif c.status in ("DEGRADED", "RECONNECTING"):
+            cam_status["degraded"] += 1
+        else:
+            cam_status["offline"] += 1
+        per_camera.append({"id": c.id, "name": c.name, "status": c.status})
+
+    def _count(status: str | None = None) -> int:
+        stmt = select(func.count(Event.id)).where(Event.timestamp_start >= midnight)
+        if status:
+            stmt = stmt.where(Event.identity_status == status)
+        return db.execute(stmt).scalar() or 0
+
+    identities = db.execute(select(func.count(Person.id))).scalar() or 0
+
+    return {
+        "generated_at": now.isoformat(),
+        "cameras": {"total": len(cameras), **cam_status, "per_camera": per_camera},
+        "events_today": {"total": _count(), "unknown": _count("unknown")},
+        "identities": identities,
+    }
 
 
 def _parse(value: str) -> dt.datetime:
@@ -34,7 +74,7 @@ def _parse(value: str) -> dt.datetime:
     except ValueError:
         raise HTTPException(status_code=400, detail="bad datetime (use ISO 8601)")
     if d.tzinfo is None:
-        d = d.replace(tzinfo=dt.timezone.utc)
+        d = d.replace(tzinfo=dt.UTC)
     return d
 
 
@@ -57,8 +97,8 @@ def dwell(camera_id: str, start: str, end: str, db: Session = Depends(get_db)):
 
 @router.get("/analytics/breakdown", dependencies=[Depends(require_permission("analytics:view"))])
 def breakdown(camera_id: str | None = None, start: str = "", end: str = "", db: Session = Depends(get_db)):
-    s = _parse(start) if start else dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
-    e = _parse(end) if end else dt.datetime(2100, 1, 1, tzinfo=dt.timezone.utc)
+    s = _parse(start) if start else dt.datetime(2000, 1, 1, tzinfo=dt.UTC)
+    e = _parse(end) if end else dt.datetime(2100, 1, 1, tzinfo=dt.UTC)
     return {"rows": [{"event_type": t, "count": c} for t, c in event_type_breakdown(db, camera_id, s, e)]}
 
 
@@ -77,8 +117,8 @@ def semantic_search(q: str, camera_id: str | None = None, start: str = "", end: 
     similarity to the query; a real CLIP/VLM backend drops in behind the same
     interface. Capped to the most recent 2000 events in range for latency.
     """
-    s = _parse(start) if start else dt.datetime(2000, 1, 1, tzinfo=dt.timezone.utc)
-    e = _parse(end) if end else dt.datetime(2100, 1, 1, tzinfo=dt.timezone.utc)
+    s = _parse(start) if start else dt.datetime(2000, 1, 1, tzinfo=dt.UTC)
+    e = _parse(end) if end else dt.datetime(2100, 1, 1, tzinfo=dt.UTC)
     stmt = select(Event).where(Event.timestamp_start >= s, Event.timestamp_end <= e)
     if camera_id:
         stmt = stmt.where(Event.camera_id == camera_id)
