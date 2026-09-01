@@ -407,3 +407,90 @@ tbody tr:last-child td { border-bottom: none; }
   main { padding: var(--sp-3); }
   .trust-chip { display: none; }  /* space; returns as menu row in Wave 3 */
 }
+
+/* ═══ Wave 1 — investigation loop ══════════════════════════════════════ */
+
+/* Event rows: click-to-open affordance + keyboard cursor */
+.event-row { cursor: pointer; }
+.event-row:hover { background: var(--surface-2); }
+.event-row.cursor {
+  background: var(--surface-2);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.media-flags { display: inline-flex; gap: var(--sp-1); }
+.media-flag { color: var(--info); font-size: 15px; line-height: 1; }
+
+/* Detail drawer */
+.drawer-scrim {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgb(0 0 0 / 45%);
+}
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 61;
+  width: min(560px, 94vw);
+  display: flex; flex-direction: column;
+  background: var(--surface-1);
+  border-left: 1px solid var(--border-1);
+  box-shadow: var(--shadow-2);
+  overflow-y: auto;
+}
+.drawer.hidden, .drawer-scrim.hidden { display: none; }
+body.drawer-open { overflow: hidden; } /* lock scroll behind drawer */
+.drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border-1);
+  position: sticky; top: 0; background: var(--surface-1); z-index: 1;
+}
+.drawer-head h2 { font-size: var(--text-xl); margin: 0; }
+.drawer-body { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-4); }
+.drawer-section h3 {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-2); margin: 0 0 var(--sp-2);
+}
+.drawer-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: var(--sp-4);
+  border-top: 1px solid var(--border-1);
+  position: sticky; bottom: 0; background: var(--surface-1);
+}
+
+/* Snapshot + CSP-safe bbox overlay (SVG attributes, not inline styles) */
+.snap-wrap { position: relative; }
+.snap-img {
+  display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain;
+  background: var(--surface-3);
+  border: 1px solid var(--border-1); border-radius: var(--radius-s);
+}
+.snap-overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+.snap-wrap.failed::after {
+  content: "Snapshot unavailable (expired or not retained)";
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--text-2); font-size: var(--text-sm);
+}
+
+/* Clip player */
+.clip-player { width: 100%; border-radius: var(--radius-s); background: #000; }
+.expiry-note { font-size: var(--text-xs); }
+.expiry-note.expiring { color: var(--warn); }
+
+/* Chips row + key-value grid in the drawer */
+.chip-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.kv-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2) var(--sp-3);
+}
+.kv { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kv-key { font-size: var(--text-xs); color: var(--text-2); }
+.kv-val { font-size: var(--text-sm); word-break: break-word; }
+
+/* Timeline scrub (Wave 1) */
+.tl-readout { font-size: var(--text-xs); text-align: right; display: block; min-height: 1.2em; }
+.tl-scrub { stroke: var(--accent); stroke-width: 1; pointer-events: none; }
+.tl-scrub.hidden { display: none; }
+.tl-interactive { cursor: pointer; }
+
+@media (max-width: 720px) {
+  .kv-grid { grid-template-columns: 1fr; }
+  .drawer { width: 100vw; border-left: none; }
+}
