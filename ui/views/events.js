@@ -1,15 +1,21 @@
-// Events view — camera-name resolution, statuses as pills, relative times,
-// pagination with 44px targets, skeleton/empty/error states.
-// Event detail drawer ships in Wave 1 (the raw-JSON link is gone).
+// Events view — Wave 1: the investigation list.
+//
+// Row click opens the detail drawer; ↑/↓ walk rows and Enter opens;
+// filters serialize into the URL hash so an investigation is shareable
+// (router.js owns view state now — the old JS-only state is gone).
 
 import { h, render } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { skeletonRows, emptyState, errorState } from "../core/states.js";
 import { fmtTime, fmtRelative, fmtDuration, shortId, label, tone } from "../core/format.js";
+import { navigate } from "../core/router.js";
 
 const PAGE = 25;
-let offset = 0;
 let cameraNames = null;
+let offset = 0;
+let lastItems = [];
+let cursor = -1; // keyboard selection index
+let listWrap = null;
 
 async function names() {
   if (cameraNames) return cameraNames;
@@ -20,10 +26,29 @@ async function names() {
   return cameraNames;
 }
 
-function eventRow(e, nameMap) {
-  const camName = nameMap.get(e.camera_id) || shortId(e.camera_id);
+function openEvent(id) {
+  navigate("events", currentFilters(), id);
+}
+
+function currentFilters() {
+  const cameraId = document.getElementById("ev-camera").value.trim();
+  const status = document.getElementById("ev-status").value;
+  return { ...(cameraId ? { camera: cameraId } : {}), ...(status ? { status } : {}) };
+}
+
+function applyFiltersToInputs(params) {
+  document.getElementById("ev-camera").value = params.camera || "";
+  document.getElementById("ev-status").value = params.status || "";
+}
+
+function eventRow(e, nameMap, idx) {
+  const camName = nameMap.get(e.camera_id) || `camera ${shortId(e.camera_id)}`;
   const durSec = (new Date(e.timestamp_end) - new Date(e.timestamp_start)) / 1000;
-  return h("tr", {},
+  return h("tr", {
+    class: "event-row",
+    dataset: { eventId: e.id, idx: String(idx) },
+    onClick: () => openEvent(e.id),
+  },
     h("td", {}, camName),
     h("td", {}, e.identity_id
       ? h("span", { class: `pill ${tone(e.identity_status)}` }, label(e.identity_status))
@@ -35,50 +60,91 @@ function eventRow(e, nameMap) {
     ),
     h("td", { class: "mono" }, Number.isFinite(durSec) ? fmtDuration(durSec) : "—"),
     h("td", { class: "mono" }, e.confidence.toFixed(2)),
+    h("td", {},
+      h("span", { class: "media-flags" },
+        e.has_snapshot ? h("span", { class: "media-flag", title: "Has snapshot" }, "◉") : null,
+        e.has_video ? h("span", { class: "media-flag", title: "Has video" }, "▶") : null,
+        (!e.has_snapshot && !e.has_video) ? h("span", { class: "muted" }, "—") : null,
+      ),
+    ),
   );
 }
 
-export async function loadEvents(listWrap, { resetOffset = false } = {}) {
+function moveCursor(delta) {
+  if (!lastItems.length || !listWrap) return;
+  cursor = Math.min(Math.max(cursor + delta, 0), lastItems.length - 1);
+  const rows = listWrap.querySelectorAll("tr.event-row");
+  rows.forEach((r) => r.classList.toggle("cursor", Number(r.dataset.idx) === cursor));
+  const sel = rows[cursor];
+  if (sel) sel.scrollIntoView({ block: "nearest" });
+}
+
+export async function loadEvents(wrapEl, { resetOffset = false, params = {} } = {}) {
+  listWrap = wrapEl;
+  applyFiltersToInputs(params);
   if (resetOffset) offset = 0;
-  const cameraId = document.getElementById("ev-camera").value.trim();
-  const status = document.getElementById("ev-status").value;
-  skeletonRows(listWrap, 6);
+  cursor = -1;
+  const filters = currentFilters();
+  skeletonRows(wrapEl, 6);
   try {
     const [data, nameMap] = await Promise.all([
-      api(`/api/events?${new URLSearchParams({ limit: PAGE, offset, ...(cameraId ? { camera_id: cameraId } : {}), ...(status ? { identity_status: status } : {}) })}`),
+      api(`/api/events?${new URLSearchParams({
+        limit: PAGE, offset, ...(filters.camera ? { camera_id: filters.camera } : {}),
+        ...(filters.status ? { identity_status: filters.status } : {}),
+      })}`),
       names(),
     ]);
-    const rows = (data.items || []).map((e) => eventRow(e, nameMap));
-    render(listWrap, rows.length
+    lastItems = data.items || [];
+    const rows = lastItems.map((e, i) => eventRow(e, nameMap, i));
+    render(wrapEl, rows.length
       ? h("div", { class: "table-scroll" },
           h("table", { id: "events-table" },
             h("thead", {}, h("tr", {},
               h("th", {}, "Camera"), h("th", {}, "Identity"), h("th", {}, "Type"),
               h("th", {}, "Start"), h("th", {}, "Duration"), h("th", {}, "Conf"),
+              h("th", {}, "Media"),
             )),
             h("tbody", {}, rows),
           ),
         )
       : emptyState({
           icon: "◌", title: "No events match",
-          hint: "Adjust the camera or status filters, or clear them to see all events.",
+          hint: "Adjust the filters — or clear them to see all events.",
         }));
     document.getElementById("ev-page").textContent =
       `${Math.floor(offset / PAGE) + 1}${data.total ? ` / ${Math.ceil(data.total / PAGE)}` : ""}`;
     document.getElementById("ev-prev").disabled = offset <= 0;
-    document.getElementById("ev-next").disabled = !data.items || data.items.length < PAGE;
+    document.getElementById("ev-next").disabled = !lastItems.length || lastItems.length < PAGE;
   } catch (err) {
-    render(listWrap, errorState(err, { noun: "events", onRetry: () => loadEvents(listWrap) }));
+    render(wrapEl, errorState(err, { noun: "events", onRetry: () => loadEvents(wrapEl, { params }) }));
   }
 }
 
-export function wireEventsPager(listWrap) {
+export function wireEventsView(wrapEl) {
+  listWrap = wrapEl;
+  document.getElementById("ev-search").addEventListener("click", () => {
+    navigate("events", currentFilters()); // URL carries the investigation
+  });
   document.getElementById("ev-prev").addEventListener("click", () => {
     offset = Math.max(0, offset - PAGE);
-    loadEvents(listWrap);
+    loadEvents(wrapEl);
   });
   document.getElementById("ev-next").addEventListener("click", () => {
     offset += PAGE;
-    loadEvents(listWrap);
+    loadEvents(wrapEl);
+  });
+
+  // Keyboard: ↑/↓ select, Enter opens — active only in the events view
+  // and when focus isn't in a filter input.
+  document.addEventListener("keydown", (e) => {
+    const panel = document.querySelector('[data-panel="events"]');
+    if (!panel || panel.classList.contains("hidden")) return;
+    if (document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName)) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); moveCursor(1); }
+    if (e.key === "ArrowUp") { e.preventDefault(); moveCursor(-1); }
+    if (e.key === "Enter" && cursor >= 0 && lastItems[cursor]) {
+      e.preventDefault();
+      openEvent(lastItems[cursor].id);
+    }
   });
 }

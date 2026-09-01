@@ -3,7 +3,7 @@
 // removing the confusing "if enabled" label).
 
 import { h } from "../core/dom.js";
-import { establishSession, clearSession } from "../core/api.js";
+import { establishSession, clearSession, primeMe } from "../core/api.js";
 
 /**
  * Wire the login form. onAuthed() runs after a successful login.
@@ -64,6 +64,7 @@ export function wireLogin(form, onAuthed) {
       }
       const data = await r.json();
       establishSession(data);
+      await primeMe(); // role-gated UI needs the role before first paint
       onAuthed();
     } catch {
       setError("Can't reach the server", "Check your connection and retry.");
