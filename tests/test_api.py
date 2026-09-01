@@ -106,13 +106,23 @@ def test_signed_video_url_access(client, admin_auth):
     assert detail["video_url"]
     u = urllib.parse.urlparse(detail["video_url"])
     q = urllib.parse.parse_qs(u.query)
-    # fetch with valid signature
+    # fetch with valid signature AND a session header
     g = client.get(f"/api/video/{urllib.parse.quote(key, safe='')}?exp={q['exp'][0]}&sig={q['sig'][0]}", headers=admin_auth)
     assert g.status_code == 200
     assert g.content == b"fake-video-bytes"
+    # fetch with valid signature and NO Authorization header — this is how
+    # <img>/<video> tags consume the link. Regression: the route used to
+    # require a Bearer, which media tags cannot send, so every drawer
+    # snapshot/clip in the real UI 401'd.
+    g2 = client.get(f"/api/video/{urllib.parse.quote(key, safe='')}?exp={q['exp'][0]}&sig={q['sig'][0]}")
+    assert g2.status_code == 200
+    assert g2.content == b"fake-video-bytes"
     # tampered signature rejected
     bad = client.get(f"/api/video/{urllib.parse.quote(key, safe='')}?exp={q['exp'][0]}&sig=deadbeef", headers=admin_auth)
     assert bad.status_code == 403
+    # tampered signature rejected without a session too
+    bad2 = client.get(f"/api/video/{urllib.parse.quote(key, safe='')}?exp={q['exp'][0]}&sig=deadbeef")
+    assert bad2.status_code == 403
 
 
 def test_user_management_requires_privilege(client, viewer_auth):
