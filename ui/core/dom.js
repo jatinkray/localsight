@@ -68,11 +68,13 @@ export function svgEl(tag, props = {}, ...children) {
 
 /**
  * Replace a container's children in one move (no incremental churn).
- * Accepts nodes, arrays, null (clears).
+ * Variadic: render(el, a, b, c) or render(el, [a, b]) — nodes, arrays,
+ * null (clears). Extra top-level arguments are all appended (Wave-2 bug:
+ * the old (container, children) signature silently dropped 3rd+ args).
  */
-export function render(container, children) {
+export function render(container, ...children) {
   while (container.firstChild) container.removeChild(container.firstChild);
-  for (const child of [children].flat(Infinity)) {
+  for (const child of children.flat(Infinity)) {
     if (child == null || child === false) continue;
     container.append(child.nodeType ? child : document.createTextNode(String(child)));
   }
