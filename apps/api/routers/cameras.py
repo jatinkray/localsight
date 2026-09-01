@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
-from packages.domain.models import Camera, NvrDevice, User
+from packages.domain.models import Camera, NvrDevice, Snapshot, User, VideoSegment
 from packages.domain.schemas import TPLinkNvrSeed
 from packages.security.crypto import CryptoBox
 from packages.security.errors import UnsafeUrlError
@@ -303,12 +303,30 @@ def update_camera(camera_id: str, body: dict, request: Request, db: Session = De
 
 
 @router.delete("/cameras/{camera_id}", dependencies=[Depends(require_permission("camera:configure"))])
-def delete_camera(camera_id: str, request: Request, db: Session = Depends(get_db)):
+def delete_camera(camera_id: str, request: Request, db: Session = Depends(get_db),
+                  rt: Runtime = Depends(get_runtime)):
     cam = db.get(Camera, camera_id)
     if not cam:
         raise HTTPException(status_code=404, detail="camera not found")
+    # FK cascades (ondelete) remove the rows; their storage objects would
+    # otherwise orphan forever, so collect keys first and delete best-effort.
+    seg_keys = [
+        row[0] for row in db.query(VideoSegment.storage_key)
+        .filter(VideoSegment.camera_id == camera_id).all()
+    ]
+    snap_keys = []
+    for row in db.query(Snapshot.storage_key_enc).filter(Snapshot.camera_id == camera_id).all():
+        try:
+            snap_keys.append(rt.crypto.decrypt_str(row[0]))
+        except Exception:  # noqa: BLE001 - undecryptable ref: row still deletes
+            continue
     db.delete(cam)
     write_audit(db, user=request.state.user, action="camera.delete", resource=camera_id,
                 request_id=getattr(request.state, "request_id", "-"))
     db.commit()
+    for key in seg_keys + snap_keys:
+        try:
+            rt.storage.delete(key)
+        except Exception:  # noqa: BLE001 - media cleanup must not fail the delete
+            pass
     return {"ok": True}
