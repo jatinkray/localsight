@@ -64,7 +64,10 @@ services:
     build:
       context: ../..
       dockerfile: infrastructure/docker/Dockerfile
-    command: python -m apps.worker
+    # The worker package has no __main__; its entry point is
+    # apps.worker.main:main (`python -m apps.worker` fails with
+    # "cannot be directly executed").
+    command: python -c "from apps.worker.main import main; main()"
     environment:
       DATABASE_URL: postgresql+psycopg://localvision:${DB_PASSWORD:-changeme}@postgres:5432/localvision
       JWT_SECRET: ${JWT_SECRET}
