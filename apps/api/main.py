@@ -20,6 +20,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from apps.api.bootstrap import build
 from apps.api.config import Settings
 from apps.api.dependencies import get_runtime
+from apps.api import domain_live_cfg
 from apps.api.routers import (
     audit,
     auth,
@@ -90,9 +91,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rules.router)
 
     # Serve transcoded live HLS segments (written by the live gateway in live.py).
-    live_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "live")
-    os.makedirs(live_dir, exist_ok=True)
-    app.mount("/live-media", StaticFiles(directory=live_dir), name="live-media")
+    # LIVE_DIR is the single shared source of truth for both the transcode root
+    # and this mount — LOCALVISION_LIVE_DIR overrides both together.
+    os.makedirs(domain_live_cfg.LIVE_DIR, exist_ok=True)
+    app.mount("/live-media", StaticFiles(directory=domain_live_cfg.LIVE_DIR), name="live-media")
 
     # Serve the static dashboard (mounted last so /api and /health win).
     ui_dir = os.path.join(os.path.dirname(__file__), "..", "..", "ui")
@@ -105,6 +107,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         logging.getLogger("localvision").exception("unhandled error", extra={"request_id": getattr(request.state, "request_id", "-")})
         return JSONResponse(status_code=500, content={"detail": "internal server error"})
+
+    @app.on_event("shutdown")
+    async def _stop_live_transcodes() -> None:
+        # Live ffmpeg transcodes are owned by this process; reap them on
+        # shutdown so they never orphan across restarts.
+        from apps.api.routers.live import shutdown_live_streams
+
+        shutdown_live_streams()
 
     return app
 
