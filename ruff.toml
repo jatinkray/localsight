@@ -1,0 +1,34 @@
+# Ruff configuration — see docs/reviews/CODE_ANALYSIS_REPORT.md (F-08/CI gates).
+# Goal: catch real defects (unused imports/variables, f-string problems,
+# subprocess safety, security-sensitive calls) without the exotic default
+# rule set that generated hundreds of low-signal findings on a clean codebase.
+
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes (unused imports/vars, undefined names)
+    "I",    # isort (import order)
+    "B",    # bugbear (likely bugs: mutable defaults, loop binding)
+    "S",    # bandit (subprocess, eval, assert usage in prod code)
+    "UP",   # pyupgrade (outdated syntax)
+    "SIM",  # simplify (collapsible ifs)
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "S101",  # assert used in tests and type-narrowing guards
+    "S603",  # subprocess calls — argv is constructed in-code, never shell=True (see packages/video/ffmpeg.py)
+    "S607",  # ffmpeg/ffprobe invoked by name on PATH (container image pins the binary)
+    "B008",  # FastAPI Depends() in defaults is the framework pattern
+    "RUF012", # mutable class attrs need ClassVar — SQLAlchemy Mapped[] columns are fine
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106", "E501"]
+"scripts/*" = ["S101"]
+
+[format]
+quote-style = "double"
