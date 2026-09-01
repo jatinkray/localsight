@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, Tuple
 
 
 @dataclass
@@ -28,7 +27,7 @@ class ModelRecord:
 class ModelRegistry:
     def __init__(self, registry_path: str = "models/registry.json") -> None:
         self._path = registry_path
-        self._models: Dict[Tuple[str, str], ModelRecord] = {}
+        self._models: dict[tuple[str, str], ModelRecord] = {}
         self._load()
 
     def _load(self) -> None:
@@ -51,8 +50,19 @@ class ModelRegistry:
         return rec
 
     def verify(self, name: str, version: str) -> bool:
-        rec = self.get(name, version)
-        actual = self._sha256(rec.path)
+        """True when the model's on-disk hash matches the registry entry.
+
+        An unregistered or missing model returns False (not an unhandled
+        KeyError): 'cannot verify' and 'not in the registry' are both refusals,
+        and callers treat them identically.
+        """
+        rec = self._models.get((name, version))
+        if rec is None:
+            return False
+        try:
+            actual = self._sha256(rec.path)
+        except OSError:
+            return False
         return actual == rec.hash_sha256
 
     @staticmethod

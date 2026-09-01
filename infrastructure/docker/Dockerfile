@@ -15,8 +15,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY requirements.txt /app/requirements.txt
-RUN pip install -r requirements.txt
+# requirements-prod.txt extends requirements.txt with the PostgreSQL driver
+# the compose stack needs (DATABASE_URL=postgresql+psycopg://...).
+COPY requirements.txt requirements-prod.txt /app/
+RUN pip install -r requirements-prod.txt
 
 COPY . /app
 

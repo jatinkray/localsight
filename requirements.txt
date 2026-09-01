@@ -13,6 +13,13 @@ httpx==0.28.1
 email-validator==2.2.0
 
 # --- optional, lazy-imported (not required for local/SQLite run) ---
-# boto3==1.35.0      # only for S3CompatibleStorage
-# pgvector==0.3.6    # only when using PostgreSQL + pgvector
-# prometheus-client  # not used; metrics exposed via built-in exporter
+# NOTE: the Docker Compose deployment uses DATABASE_URL=postgresql+psycopg://...
+# so production containers MUST install psycopg. It lives in the api/worker
+# image requirements (infrastructure/docker/Dockerfile) — if you deploy on
+# PostgreSQL without Docker, uncomment the next line.
+# psycopg[binary]==3.2.3   # required for PostgreSQL (compose default)
+# boto3==1.35.0            # only for S3CompatibleStorage
+# pgvector==0.3.6          # only when using PostgreSQL + pgvector
+# numpy==2.1.0             # reference motion detector + real ONNX backends
+# psutil==6.1.0            # /api/system metrics (cpu/ram/storage gauges)
+# prometheus-client        # not used; metrics exposed via built-in exporter

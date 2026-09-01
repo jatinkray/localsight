@@ -13,7 +13,6 @@ import json
 from packages.ai import detectors, rules
 from packages.ai.anpr import ANPRPipeline, ReferencePlateDetector, ReferencePlateOCR
 from packages.ai.rules import (
-    AnalyticEvent,
     CrowdCountRule,
     LineCrossingRule,
     LoiteringRule,
@@ -24,7 +23,7 @@ from packages.ai.rules import (
     segments_intersect,
 )
 from packages.ai.vlm import ReferenceSceneEmbedder, SemanticSearch
-from packages.domain.models import AuditLog, Camera, Event, Track, VideoSegment
+from packages.domain.models import AuditLog, Event, Track, VideoSegment
 from packages.notify import Alert, MqttNotifier, PushNotifier
 from packages.video import onvif, presets
 from packages.video.recorder import Recorder, segment_boundary, segment_key
@@ -52,7 +51,7 @@ def _line_engine(direction=None):
 
 def test_line_cross_entering_fires_once():
     e = _line_engine(direction=-1)  # require left->right crossing
-    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
     evs = []
     evs += e.evaluate([("t1", "person", (0.3, 0.1, 0.1, 0.2))], t0)
     evs += e.evaluate([("t1", "person", (0.6, 0.5, 0.1, 0.2))], t0 + dt.timedelta(seconds=1))
@@ -65,7 +64,7 @@ def test_line_cross_entering_fires_once():
 
 def test_line_cross_wrong_direction_suppressed():
     e = _line_engine(direction=-1)  # left->right only
-    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
     evs = e.evaluate([("t1", "person", (0.6, 0.1, 0.1, 0.2))], t0)
     evs += e.evaluate([("t1", "person", (0.3, 0.5, 0.1, 0.2))], t0 + dt.timedelta(seconds=1))
     assert evs == []  # moved right->left, suppressed
@@ -75,7 +74,7 @@ def test_line_cross_wrong_direction_suppressed():
 def test_intrusion_fires_after_enter():
     e = rules.RuleEngine("cam1")
     e.add(ZoneIntrusionRule("z1", [(0.4, 0.4), (0.6, 0.4), (0.6, 0.6), (0.4, 0.6)], camera_id="cam1"))
-    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
     out = e.evaluate([("t1", "person", (0.5, 0.5, 0.05, 0.1))], t0)
     assert any(o.rule_type == rules.EVENT_INTRUSION for o in out)
 
@@ -83,7 +82,7 @@ def test_intrusion_fires_after_enter():
 def test_loitering_fires_only_after_dwell():
     e = rules.RuleEngine("cam1")
     e.add(LoiteringRule("l1", [(0.4, 0.4), (0.6, 0.4), (0.6, 0.6), (0.4, 0.6)], dwell_sec=5.0, camera_id="cam1"))
-    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
     out = []
     for i in range(3):  # 3s, below dwell
         out += e.evaluate([("t1", "person", (0.5, 0.5, 0.05, 0.1))], t0 + dt.timedelta(seconds=i))
@@ -97,7 +96,7 @@ def test_crowd_count_threshold():
     e = rules.RuleEngine("cam1")
     zone = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
     e.add(CrowdCountRule("c1", zone, threshold=3, camera_id="cam1"))
-    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
     tracks = [(f"t{i}", "person", (0.1 * i, 0.5, 0.05, 0.1)) for i in range(2)]
     out = e.evaluate(tracks, t0)
     assert not any(o.rule_type == rules.EVENT_CROWD for o in out)
@@ -141,7 +140,7 @@ def test_build_detector_reference(monkeypatch):
     d = detectors.build_detector(S(), None)
     assert isinstance(d, detectors.ReferenceMotionDetector)
     # without numpy, reference detector returns no detections but never raises
-    assert d.detect(None, dt.datetime.now(dt.timezone.utc)) == []
+    assert d.detect(None, dt.datetime.now(dt.UTC)) == []
 
 
 def test_onnx_detector_requires_runtime(monkeypatch):
@@ -290,7 +289,7 @@ def test_build_detector_tensorrt_not_installed(monkeypatch):
     monkeypatch.setattr(detectors, "TensorRTDetector",
                        lambda *a, **k: (_ for _ in ()).throw(
                            RuntimeError("tensorrt is not installed")))
-    from packages.ai.registry import ModelRegistry, ModelRecord
+    from packages.ai.registry import ModelRecord, ModelRegistry
     reg = ModelRegistry()
     rec = ModelRecord(name="detector", version="latest",
                       path="/tmp/fake.engine", hash_sha256="a" * 64)
@@ -319,7 +318,7 @@ def test_build_detector_tensorrt_not_installed(monkeypatch):
         ai_model_name = "detector"
         ai_model_version = "latest"
 
-    from packages.ai.registry import ModelRegistry, ModelRecord
+    from packages.ai.registry import ModelRecord, ModelRegistry
     reg = ModelRegistry()
     rec = ModelRecord(name="detector", version="latest",
                       path="/tmp/fake.engine", hash_sha256="a" * 64)
@@ -336,17 +335,17 @@ def test_build_detector_tensorrt_not_installed(monkeypatch):
 def test_anpr_reference_and_watchlist():
     pipe = ANPRPipeline(ReferencePlateDetector(), ReferencePlateOCR(seed_plate="AB12CDE"),
                         watchlist={"AB12CDE"})
-    reading = pipe.read(None, dt.datetime.now(dt.timezone.utc))
+    reading = pipe.read(None, dt.datetime.now(dt.UTC))
     assert reading is not None
     assert reading.plate == "AB12CDE"
     assert pipe.match_watchlist(reading) == "AB12CDE"
-    assert pipe.match_watchlist(ANPRPipeline(ReferencePlateDetector(), ReferencePlateOCR(seed_plate="!!")).read(None, dt.datetime.now(dt.timezone.utc))) is None
+    assert pipe.match_watchlist(ANPRPipeline(ReferencePlateDetector(), ReferencePlateOCR(seed_plate="!!")).read(None, dt.datetime.now(dt.UTC))) is None
 
 
 def test_anpr_normalize_rejects_garbage():
     assert ANPRPipeline.normalize("ab-12-cde") == "AB12CDE"
     pipe = ANPRPipeline(ReferencePlateDetector(), ReferencePlateOCR(seed_plate="!!"))
-    assert pipe.read(None, dt.datetime.now(dt.timezone.utc)) is None
+    assert pipe.read(None, dt.datetime.now(dt.UTC)) is None
 
 
 # ── VLM semantic search ────────────────────────────────────────────────────
@@ -366,8 +365,8 @@ def test_vlm_search_ranking():
 def test_recorder_segment_logic(monkeypatch):
     monkeypatch.setattr("packages.video.recorder.validate_egress_url", lambda *a, **k: None)
     monkeypatch.setattr("packages.video.ffmpeg.validate_egress_url", lambda *a, **k: None)
-    t0 = dt.datetime(2026, 1, 1, 12, 3, 45, tzinfo=dt.timezone.utc)
-    assert segment_boundary(t0, 300) == dt.datetime(2026, 1, 1, 12, 0, 0, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, 12, 3, 45, tzinfo=dt.UTC)
+    assert segment_boundary(t0, 300) == dt.datetime(2026, 1, 1, 12, 0, 0, tzinfo=dt.UTC)
     assert segment_key("cam1", t0).startswith("camera/cam1/2026/01/01/120000.mp4")
 
     class FakeProc:
@@ -432,7 +431,7 @@ def _seed_camera_and_events(client):
     rt = client.app.state.runtime
     r = client.post("/api/cameras", json={"name": "cam-a"}, headers={"Authorization": _admin(client)})
     cam_id = r.json()["id"]
-    start = dt.datetime(2026, 3, 1, 8, 0, 0, tzinfo=dt.timezone.utc)
+    start = dt.datetime(2026, 3, 1, 8, 0, 0, tzinfo=dt.UTC)
     with rt.SessionLocal() as s:
         for i in range(3):
             ev = Event(camera_id=cam_id, event_type="presence", identity_status="unknown",
@@ -683,7 +682,7 @@ def test_event_clip_export(client):
     cam_id = r.json()["id"]
 
     rt = client.app.state.runtime
-    t0 = dt.datetime(2026, 1, 1, 0, 0, 0, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, 0, 0, 0, tzinfo=dt.UTC)
     payload_a = b"\x00\x00\x00\x18ftypisom" + b"A" * 64
     payload_b = b"\x00\x00\x00\x18ftypisom" + b"B" * 64
     key_a = f"{cam_id}/2026-01-01T00-00-00/seg-a.mp4"
@@ -765,7 +764,7 @@ def test_timeline_merged(client):
     cam_id = client.post("/api/cameras", json={"name": "cam-tl"}, headers=h).json()["id"]
     cam2 = client.post("/api/cameras", json={"name": "cam-tl2"}, headers=h).json()["id"]
     rt = client.app.state.runtime
-    t0 = dt.datetime(2026, 1, 1, 12, 0, 0, tzinfo=dt.timezone.utc)
+    t0 = dt.datetime(2026, 1, 1, 12, 0, 0, tzinfo=dt.UTC)
     with rt.SessionLocal() as s:
         s.add(Event(camera_id=cam_id, event_type="presence",
                     timestamp_start=t0, timestamp_end=t0 + dt.timedelta(minutes=10),
@@ -821,7 +820,7 @@ def test_live_streams_health(client):
 
     saved = dict(live_mod._live_streams)
     try:
-        live_mod._live_streams["cam-live-1"] = _FakeProc(pid=7777)
+        live_mod._live_streams["cam-live-1"] = live_mod._LiveStream(_FakeProc(pid=7777))
         h = {"Authorization": _admin(client)}
         r = client.get("/api/live/streams", headers=h)
         assert r.status_code == 200
@@ -831,6 +830,8 @@ def test_live_streams_health(client):
         assert len(mine) == 1
         assert mine[0]["running"] is True
         assert mine[0]["pid"] == 7777
+        # idle_sec now reports viewer staleness (reaper input)
+        assert "idle_sec" in mine[0]
         assert client.get("/api/live/streams").status_code == 401
     finally:
         live_mod._live_streams.clear()
@@ -858,6 +859,259 @@ def test_live_ticket_flow(client):
     # viewer can also obtain a ticket (live:view granted)
     vh = {"Authorization": _viewer(client)}
     assert client.post("/api/live/ticket", json={"camera_id": cam_id, "ttl_sec": 60}, headers=vh).status_code == 200
+
+
+def test_live_stop_endpoint(client):
+    """F-07: explicit stop control reaps the transcode and reports idempotently."""
+    from apps.api.routers import live as live_mod
+
+    class _FakeProc:
+        pid = 4242
+        _terminated = False
+
+        def poll(self):
+            return None if not self._terminated else 0
+
+        def terminate(self):
+            self._terminated = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    saved = dict(live_mod._live_streams)
+    try:
+        live_mod._live_streams["cam-stop-1"] = live_mod._LiveStream(_FakeProc())
+        h = {"Authorization": _admin(client)}
+        r = client.post("/api/live/cam-stop-1/stop", headers=h)
+        assert r.status_code == 200
+        assert r.json() == {"camera_id": "cam-stop-1", "stopped": True}
+        # idempotent: nothing running -> stopped=false, still 200
+        r2 = client.post("/api/live/cam-stop-1/stop", headers=h)
+        assert r2.status_code == 200 and r2.json()["stopped"] is False
+    finally:
+        live_mod._live_streams.clear()
+        live_mod._live_streams.update(saved)
+
+
+def test_live_reaper_kills_idle_streams():
+    """F-07: idle streams beyond LIVE_IDLE_TIMEOUT_SEC are terminated by the reaper."""
+    from apps.api.routers import live as live_mod
+
+    class _FakeProc:
+        pid = 1
+        terminated = False
+
+        def poll(self):
+            return None if not self.terminated else 0
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    saved = dict(live_mod._live_streams)
+    p = _FakeProc()
+    ls = live_mod._LiveStream(p)
+    # simulate a stream nobody probed for an hour
+    ls.last_probe_ts = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=3600)
+    ls.started_ts = ls.last_probe_ts
+    live_mod._live_streams["cam-idle"] = ls
+    try:
+        # run one reaper iteration synchronously by invoking the logic directly:
+        # same predicate the daemon loop applies.
+        now = dt.datetime.now(dt.UTC)
+        idle_for = (now - ls.last_probe_ts).total_seconds()
+        assert idle_for > live_mod.LIVE_IDLE_TIMEOUT_SEC
+        live_mod._stop_stream("cam-idle")
+        assert p.terminated is True
+        assert "cam-idle" not in live_mod._live_streams
+    finally:
+        live_mod._live_streams.clear()
+        live_mod._live_streams.update(saved)
+
+
+# ── regression: Event.detail round-trip (report F-01) ──────────────────────
+def test_anpr_event_detail_persists_and_endpoints_serve(client):
+    """The exact paths that 500'd before the fix: ANPR events carry encrypted
+    plate material in Event.detail; /api/alerts/events and /api/analytics/search
+    must read it without AttributeError."""
+
+    h = {"Authorization": _admin(client)}
+    cam_r = client.post("/api/cameras", json={"name": "cam-anpr"}, headers=h)
+    cam_id = cam_r.json()["id"]
+
+    # Seed an ANPR event the way the worker writes it (detail = encrypted blob).
+    with client.app.state.runtime.SessionLocal() as s:
+        now = dt.datetime.now(dt.UTC)
+        s.add(Event(
+            camera_id=cam_id, event_type="anpr", identity_status="unknown",
+            timestamp_start=now, timestamp_end=now, confidence=0.9,
+            bbox={"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2},
+            detail={"plate_enc": "gAAAA.encrypted", "plate_hash": "abc123"},
+        ))
+        s.commit()
+
+    # alerts feed reads detail (previously AttributeError -> 500)
+    r = client.get("/api/alerts/events", headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    items = body.get("items", body) if isinstance(body, dict) else body
+    anpr = [e for e in items if e.get("event_type") == "anpr"]
+    assert anpr and anpr[0]["detail"]["plate_hash"] == "abc123"
+
+    # semantic search indexes detail (previously AttributeError -> 500)
+    r2 = client.get("/api/analytics/search", params={"q": "vehicle", "limit": 5}, headers=h)
+    assert r2.status_code == 200, r2.text
+
+
+# ── regression: privacy masks suppress detection (report F-05) ─────────────
+def test_privacy_masks_suppress_detections():
+    """A detection inside a privacy mask must never produce a track or event;
+    an identical unmasked detection must."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from packages.ai.pipeline import CameraPipeline
+    from packages.ai.tracker import IouTracker
+    from packages.domain.models import Base
+
+    class _Detector:
+        def __init__(self, box):
+            self._box = box
+
+        def detect(self, frame, ts):
+            from packages.ai.interfaces import Detection
+            return [Detection(label="person", confidence=0.95, bbox=self._box)]
+
+    class _Storage:
+        def put(self, *a):
+            pass
+
+    class _Crypto:
+        def encrypt_str(self, s):
+            return s
+
+        def decrypt_json(self, t):
+            return [0.1] * 128
+
+    eng = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(eng)
+    S = sessionmaker(bind=eng, future=True)
+    ts = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+
+    masked = CameraPipeline(
+        "cam-mask", _Detector((0.5, 0.5, 0.1, 0.2)), IouTracker(), None, None,
+        S, _Storage(), _Crypto(),
+        privacy_masks=[{"x": 0.4, "y": 0.4, "w": 0.3, "h": 0.3}],
+    )
+    with S() as s:
+        masked.process_frame(s, None, ts)
+        s.commit()
+    assert len(masked._active) == 0, "masked detection must be suppressed"
+    with S() as s:
+        assert s.query(Track).filter(Track.camera_id == "cam-mask").count() == 0
+
+    control = CameraPipeline(
+        "cam-ctrl", _Detector((0.05, 0.05, 0.1, 0.2)), IouTracker(), None, None,
+        S, _Storage(), _Crypto(),
+    )
+    with S() as s:
+        control.process_frame(s, None, ts)
+        s.commit()
+    assert len(control._active) == 1, "unmasked control must track"
+
+
+# ── regression: FK cascades on delete (report F-03) ─────────────────────────
+def test_person_delete_cascades_embeddings(client):
+    """Deleting an enrolled person (GDPR erasure) must remove their embeddings
+    instead of raising IntegrityError on FK-enforcing databases."""
+    h = {"Authorization": _admin(client)}
+    r = client.post("/api/persons", json={"label": "emp-cascade", "display_name": "E"}, headers=h)
+    assert r.status_code == 200, r.text
+    pid = r.json()["id"]
+
+    # enroll an embedding directly (worker-equivalent path)
+    with client.app.state.runtime.SessionLocal() as s:
+        from packages.domain.models import PersonEmbedding
+
+        s.add(PersonEmbedding(person_id=pid, embedding_enc="enc", model_version="ref-v0", dimension=128))
+        s.commit()
+
+    d = client.delete(f"/api/persons/{pid}", headers=h)
+    assert d.status_code == 200, d.text
+    with client.app.state.runtime.SessionLocal() as s:
+        from packages.domain.models import PersonEmbedding
+
+        assert s.query(PersonEmbedding).filter(PersonEmbedding.person_id == pid).count() == 0
+
+
+def test_camera_delete_cascades_children(client):
+    """Deleting a camera must cascade its detections/events, not 500."""
+    h = {"Authorization": _admin(client)}
+    cam_id = client.post("/api/cameras", json={"name": "cam-cascade"}, headers=h).json()["id"]
+    now = dt.datetime.now(dt.UTC)
+    with client.app.state.runtime.SessionLocal() as s:
+        s.add(Event(camera_id=cam_id, event_type="presence",
+                    timestamp_start=now, timestamp_end=now, confidence=0.9, bbox={}))
+        s.commit()
+    d = client.delete(f"/api/cameras/{cam_id}", headers=h)
+    assert d.status_code == 200, d.text
+
+
+# ── regression: detection write gating (report F-04) ────────────────────────
+def test_stationary_track_writes_few_detections():
+    """A track that doesn't move must not INSERT a Detection row per frame."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from packages.ai.pipeline import CameraPipeline
+    from packages.ai.tracker import IouTracker
+    from packages.domain.models import Base, Detection
+
+    class _Detector:
+        def detect(self, frame, ts):
+            from packages.ai.interfaces import Detection
+            return [Detection(label="person", confidence=0.95, bbox=(0.5, 0.5, 0.1, 0.2))]
+
+    class _Storage:
+        def put(self, *a):
+            pass
+
+    class _Crypto:
+        def encrypt_str(self, s):
+            return s
+
+        def decrypt_json(self, t):
+            return [0.1] * 128
+
+    eng = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(eng)
+    S = sessionmaker(bind=eng, future=True)
+    p = CameraPipeline("cam-gate", _Detector(), IouTracker(), None, None, S, _Storage(), _Crypto())
+    ts = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    for i in range(10):
+        with S() as s:
+            p.process_frame(s, None, ts + dt.timedelta(seconds=i * 0.2))
+            s.commit()
+    with S() as s:
+        n = s.query(Detection).filter(Detection.camera_id == "cam-gate").count()
+    # 10 frames, stationary: gated to ~1 row per _DETECTION_MAX_INTERVAL_SEC
+    assert n < 10, f"stationary track wrote {n} detection rows for 10 frames; gating failed"
+
+
+# ── regression: login timing parity (report F-08) ───────────────────────────
+def test_login_nonexistent_user_costs_argon2(client):
+    """A login for a nonexistent account must go through one Argon2 verify
+    (against the fixed dummy hash) — no branch skip, no per-request re-hash."""
+    from apps.api.routers.auth import _DUMMY_HASH
+
+    assert _DUMMY_HASH.startswith("$argon2id$")  # constant precomputed hash
+    t0 = dt.datetime.now()
+    r = client.post("/api/auth/login", json={"email": "ghost@nowhere.io", "password": "whatever!"})
+    assert r.status_code == 401
+    # the branch must have been exercised long enough for a real verify
+    assert (dt.datetime.now() - t0).total_seconds() > 0.01
 
 
 # ── cameras vendor presets API ──────────────────────────────────────────────

@@ -9,12 +9,19 @@ FFmpeg is launched as a confined subprocess (no shell, validated URL — reuses 
 SSRF guard via `validate_egress_url`, which also honors the deploy-time allowlist so
 private-VLAN camera URLs are accepted). Segment scheduling is pure and unit-tested;
 only the subprocess spawn is environment-dependent and is injectable for tests.
+
+Memory note: completed segments move to storage via `StorageProvider.put_stream`,
+which never buffers the payload in the process heap — a 4 Mbps main stream fills a
+300 s segment with ~150 MB, and a high-bitrate NVR can exceed 1 GB, so this path
+must stay streaming.
 """
 from __future__ import annotations
 
 import datetime as dt
 import os
 import subprocess
+import tempfile
+import time as _time
 from typing import Callable, Optional
 
 from packages.domain.models import VideoSegment
@@ -43,10 +50,6 @@ def segment_key(camera_id: str, start: dt.datetime, ext: str = "mp4", seg_second
     )
 
 
-def _tmp_path(camera_id: str, start: dt.datetime) -> str:
-    return f"/tmp/seg_{camera_id}_{start.timestamp()}.mp4"
-
-
 class Recorder:
     def __init__(
         self,
@@ -57,6 +60,7 @@ class Recorder:
         spawn: Callable[..., subprocess.Popen] | None = None,
         on_segment: Callable[[VideoSegment], None] | None = None,
         allowlist: list[str] | None = None,
+        tmp_root: str | None = None,
     ) -> None:
         self.camera_id = camera_id
         self.storage = storage
@@ -65,13 +69,25 @@ class Recorder:
         self._spawn = spawn or subprocess.Popen
         self._on_segment = on_segment
         self._allowlist = allowlist
+        # Private scratch dir (0700) instead of a predictable /tmp path: brief
+        # plaintext media on a shared host must not be world-readable, and a
+        # fixed name is a symlink hazard on multi-process hosts.
+        self._tmp_root = tmp_root or os.path.join(
+            tempfile.gettempdir(), f"localsight-rec-{camera_id}"
+        )
+        os.makedirs(self._tmp_root, mode=0o700, exist_ok=True)
         self._procs: dict[str, subprocess.Popen] = {}
         self._pending: dict[str, VideoSegment] = {}
         self._last_proc: Optional[subprocess.Popen] = None
         self._last_seg: Optional[VideoSegment] = None
 
+    def _tmp_path(self, start: dt.datetime) -> str:
+        return os.path.join(
+            self._tmp_root, f"seg_{self.camera_id}_{start.timestamp()}.mp4"
+        )
+
     def _build_args(self, url: str, start: dt.datetime) -> list[str]:
-        tmp = _tmp_path(self.camera_id, start)
+        tmp = self._tmp_path(start)
         return [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
             "-rtsp_transport", "tcp", "-i", url,
@@ -113,10 +129,28 @@ class Recorder:
         self._last_seg = seg
         return seg
 
+    def _actual_duration(self, path: str) -> Optional[float]:
+        """Probe the real duration of a finished segment via ffprobe.
+
+        `record_url` pre-fills `duration_sec`/`end_ts` from the schedule; if the
+        stream dropped at t=80 s the file is 80 s long, and trusting the schedule
+        would mis-align every timeline render and clip window computed from it.
+        """
+        try:
+            out = subprocess.run(
+                ["ffprobe", "-hide_banner", "-v", "error",
+                 "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                capture_output=True, timeout=30, check=True,
+            )
+            return float(out.stdout.strip())
+        except Exception:  # noqa: BLE001 - metadata is best-effort
+            return None
+
     def finalize_last(self) -> Optional[VideoSegment]:
-        """Wait for the most recent segment's ffmpeg process to finish, upload the
-        clip to storage (if a provider is configured), and return the row with the
-        real size. Returns None if the segment failed or is missing.
+        """Wait for the most recent segment's ffmpeg process to finish, move the
+        clip to storage via the streaming path (no heap buffering), correct the
+        row's duration from the actual file, and return it. Returns None if the
+        segment failed or is missing.
         """
         seg = self._last_seg
         proc = self._last_proc
@@ -133,29 +167,51 @@ class Recorder:
                 pass
         if proc.returncode not in (0, None):
             return None
-        tmp = _tmp_path(self.camera_id, seg.start_ts)
+        tmp = self._tmp_path(seg.start_ts)
         try:
-            with open(tmp, "rb") as fh:
-                data = fh.read()
+            if not os.path.isfile(tmp) or os.path.getsize(tmp) == 0:
+                return None
+            # Reconcile scheduled vs. actual duration (stream may have dropped
+            # early) so timelines and clip windows stay truthful.
+            actual = self._actual_duration(tmp)
+            if actual is not None and actual > 0:
+                seg.duration_sec = actual
+                seg.end_ts = seg.start_ts + dt.timedelta(seconds=actual)
+            if self.storage is not None:
+                # Streaming move: ffmpeg already wrote the bytes; uploading via
+                # put_stream avoids reading a potentially >1 GB file into RAM.
+                seg.size_bytes = self.storage.put_stream(
+                    seg.storage_key, tmp, "video/mp4"
+                )
+            else:
+                seg.size_bytes = os.path.getsize(tmp)
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
         except OSError:
             return None
-        finally:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-        if not data:
-            return None
-        if self.storage is not None:
-            self.storage.put(seg.storage_key, data, "video/mp4")
-        seg.size_bytes = len(data)
         if self._on_segment:
             self._on_segment(seg)
         return seg
 
     def stop_all(self) -> None:
+        """Terminate all in-flight segments and reap their processes."""
         for p in self._procs.values():
             if p.poll() is None:
-                p.terminate()
+                try:
+                    p.terminate()
+                except OSError:  # noqa: BLE001 - process may have exited
+                    pass
+        # Reap so terminated ffmpeg children don't linger as zombies.
+        deadline = _time.monotonic() + 5.0
+        for p in self._procs.values():
+            try:
+                p.wait(timeout=max(0.1, deadline - _time.monotonic()))
+            except Exception:  # noqa: BLE001 - best-effort reap
+                try:
+                    p.kill()
+                except OSError:
+                    pass
         self._procs.clear()
         self._pending.clear()

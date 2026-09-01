@@ -29,6 +29,9 @@ class Metrics:
         "api_latency_ms": "API request latency in ms",
         "queue_depth": "Inference queue depth",
         "camera_disconnects_total": "Camera disconnect events",
+        "pipeline_latency_ms": "Per-frame pipeline processing latency in ms",
+        "analytic_events_total": "Point-in-time analytic events (rules/ANPR)",
+        "camera_status": "1 when camera gateway reports STREAMING, else 0",
     }
 
     def __init__(self) -> None:

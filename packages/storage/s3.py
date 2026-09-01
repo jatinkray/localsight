@@ -1,7 +1,20 @@
 """S3-compatible storage (optional). Imported lazily so the package has no
 hard boto3 dependency for local/SQLite deployments.
+
+Media delivery follows the same contract as the local backend: `sign_get_url`
+returns an *application-relative* `/api/video/...` path authorized by the
+deployment-wide HMAC scheme, and the app streams bytes from S3 server-side.
+No external S3 URL is ever exposed to the browser — critical for on-prem
+deployments where the bucket is intentionally unreachable from client networks
+and the product's "video never leaves the site" promise.
 """
 from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+import time
+import urllib.parse
 
 from packages.storage.base import StorageProvider
 
@@ -26,16 +39,27 @@ class S3CompatibleStorage(StorageProvider):
         self._client = boto3.client(
             "s3", endpoint_url=endpoint_url, region_name=region
         )
-        self._secret = signing_secret
-        from packages.storage.local import LocalFilesystemStorage  # reuse signing
-
-        self._signer = LocalFilesystemStorage("/tmp", signing_secret)
+        self._secret = signing_secret.encode()
 
     def _full_key(self, key: str) -> str:
         return f"{self._prefix}/{key}" if self._prefix else key
 
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
         self._client.put_object(Bucket=self._bucket, Key=self._full_key(key), Body=data, ContentType=content_type)
+
+    def put_stream(self, key: str, source_path: str, content_type: str = "application/octet-stream") -> int:
+        """Upload a file via multipart — the payload never enters the heap.
+
+        boto3's `upload_file` streams from disk in configurable chunks and
+        handles multipart assembly, which `put_object` with an in-memory body
+        cannot do for multi-hundred-MB recordings.
+        """
+        size = os.path.getsize(source_path)
+        self._client.upload_file(
+            source_path, self._bucket, self._full_key(key),
+            ExtraArgs={"ContentType": content_type},
+        )
+        return size
 
     def get(self, key: str) -> bytes:
         from botocore.exceptions import ClientError
@@ -58,10 +82,24 @@ class S3CompatibleStorage(StorageProvider):
         except ClientError:  # pragma: no cover
             return False
 
+    # ── signed URLs (shared HMAC scheme; identical contract to local) ──────
+    def _sig(self, key: str, exp: int) -> str:
+        mac = hmac.new(self._secret, f"{key}:{exp}".encode(), hashlib.sha256)
+        return mac.hexdigest()
+
     def sign_get_url(self, key: str, expires_sec: int = 300) -> str:
-        url = self._client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": self._bucket, "Key": self._full_key(key)},
-            ExpiresIn=expires_sec,
-        )
-        return url
+        # App-relative path — the app proxies S3 bytes on verify; the bucket
+        # endpoint is never disclosed to the client.
+        exp = int(time.time()) + expires_sec
+        sig = self._sig(key, exp)
+        return f"/api/video/{urllib.parse.quote(key, safe='')}?exp={exp}&sig={sig}"
+
+    def verify_signed_url(self, key: str, exp: str, sig: str) -> bool:
+        try:
+            exp_i = int(exp)
+        except ValueError:
+            return False
+        if exp_i < int(time.time()):
+            return False
+        expected = self._sig(key, exp_i)
+        return hmac.compare_digest(expected, sig or "")

@@ -78,10 +78,16 @@ class EmailNotifier(Notifier):
         import smtplib
         import ssl
 
-        with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as s:
-            if self.smtp_port == 465:
+        # Port 465 is implicit TLS (SMTPS); STARTTLS is the 587 upgrade path.
+        # Calling starttls() on 465 fails or hangs against real servers.
+        if self.smtp_port == 465:
+            with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=10,
+                                  context=ssl.create_default_context()) as s:
+                s.sendmail(self.sender, self.recipients, body)
+        else:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10) as s:
                 s.starttls(context=ssl.create_default_context())
-            s.sendmail(self.sender, self.recipients, body)
+                s.sendmail(self.sender, self.recipients, body)
 
 
 class PushNotifier(Notifier):
@@ -187,7 +193,7 @@ class MqttNotifier(Notifier):
         password: str | None = None,
         tls: bool = False,
         qos: int = 0,
-        retain: bool = True,
+        retain: bool = False,
     ) -> None:
         self.host = host
         self.port = port
@@ -197,6 +203,9 @@ class MqttNotifier(Notifier):
         self.password = password
         self.tls = tls
         self.qos = qos
+        # Default retain=False: alerts are transient. A retained alert would
+        # replay to every future subscriber forever — stale security alerts
+        # persisting on the broker long after the incident.
         self.retain = retain
 
     def _render_topic(self, alert: Alert) -> str:

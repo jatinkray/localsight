@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import shutil
 import time
 import urllib.parse
 
@@ -35,7 +36,7 @@ class LocalFilesystemStorage(StorageProvider):
             raise ValueError("key escapes storage root")
         return full
 
-    # ── object ops ────────────────────────────────────────────────────────
+    # ── object ops ───────────────────────────────────────────────────────
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
         path = self._resolve(key)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -43,6 +44,26 @@ class LocalFilesystemStorage(StorageProvider):
         with open(tmp, "wb") as fh:
             fh.write(data)
         os.replace(tmp, path)  # atomic
+
+    def put_stream(self, key: str, source_path: str, content_type: str = "application/octet-stream") -> int:
+        """Move `source_path` into storage without buffering it in memory.
+
+        Large recordings land here: the recorder's ffmpeg output is moved with
+        a same-filesystem rename when possible (zero-copy) or a chunked copy
+        across filesystems. Either way the payload never enters the heap.
+        """
+        path = self._resolve(key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        size = os.path.getsize(source_path)
+        tmp = path + f".tmp.{os.getpid()}"
+        try:
+            os.replace(source_path, tmp)
+        except OSError:
+            # Cross-device (e.g. /tmp tmpfs -> storage volume): chunked copy.
+            shutil.copyfile(source_path, tmp)
+            os.remove(source_path)
+        os.replace(tmp, path)  # atomic publish
+        return size
 
     def get(self, key: str) -> bytes:
         with open(self._resolve(key), "rb") as fh:

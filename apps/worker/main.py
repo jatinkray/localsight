@@ -11,14 +11,16 @@ out to the configured alert channels.
 """
 from __future__ import annotations
 
+import datetime as dt
 import os
 import queue
+import signal
 import threading
 import time
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
-import datetime as dt
-
+from apps.api.bootstrap import build
+from apps.api.config import Settings
 from packages.ai.anpr import ANPRPipeline, ReferencePlateDetector, ReferencePlateOCR
 from packages.ai.detectors import build_detector
 from packages.ai.face import ReferenceEmbedder, ReferenceFaceDetector
@@ -27,17 +29,25 @@ from packages.ai.matcher import VectorMatcher
 from packages.ai.pipeline import CameraPipeline
 from packages.ai.rules import rule_engine_from_json
 from packages.ai.tracker import IouTracker
-from packages.domain.models import AlertRoute, Camera, Event, Snapshot, VideoSegment
+from packages.domain import timeutil
+from packages.domain.models import (
+    AlertRoute,
+    AuditLog,
+    Camera,
+    Event,
+    PersonEmbedding,
+    RefreshToken,
+    Snapshot,
+    VideoSegment,
+)
 from packages.notify import Alert, PushNotifier, WebhookNotifier, build_notifier, dispatch
 from packages.observability.logging import configure_logging, logging
+from packages.observability.metrics import metrics
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
 from packages.video.gateway import StreamGateway
 from packages.video.recorder import Recorder
 from packages.video.sources import FFmpegFrameSource, SyntheticFrameSource
-
-from apps.api.bootstrap import build
-from apps.api.config import Settings
 
 log = logging.getLogger("localvision.worker")
 
@@ -81,9 +91,9 @@ def _load_routes(rt) -> list:
     try:
         with rt.SessionLocal() as s:
             for r in s.query(AlertRoute).filter_by(enabled=True).all():
-                cfg = r.config_enc and rt.crypto.decrypt_json(r.config_enc) or {}
+                cfg = (r.config_enc and rt.crypto.decrypt_json(r.config_enc)) or {}
                 routes.append((r.channel, cfg, r.rule_type, r.camera_id, r.cooldown_sec))
-    except Exception as exc:  # noqa: BLE001 - degraded: no routes this round
+    except Exception as exc:
         log.warning("failed to load alert routes: %s", exc)
     env_webhook = os.environ.get("ALERT_WEBHOOK_URL")
     if env_webhook:
@@ -93,9 +103,16 @@ def _load_routes(rt) -> list:
     return routes
 
 
-def _build_notifiers(rt, alert: Alert) -> List:
-    """Select notifiers for an alert per configured routes; always capture in-process."""
-    notifiers: List = [PushNotifier()]
+def _build_notifiers(rt, alert: Alert) -> list:
+    """Select notifiers for an alert per configured routes; always capture in-process.
+
+    The reference PushNotifier() (in-process buffer) is only added when no push
+    *route* matched — otherwise every push alert would be captured twice. The
+    cooldown is recorded only after the notifier was successfully constructed,
+    so a config error doesn't silently consume the cooldown window.
+    """
+    notifiers: list = []
+    push_route_matched = False
     for channel, cfg, rule_type, camera_id, cooldown_sec in _load_routes(rt):
         if rule_type not in ("*", alert.rule_type):
             continue
@@ -105,6 +122,7 @@ def _build_notifiers(rt, alert: Alert) -> List:
         if _cooldown.is_in_cooldown(cd_key, cooldown_sec):
             log.debug("suppressed by cooldown: %s %s cam=%s", channel, rule_type, camera_id)
             continue
+        built = None
         if channel == "webhook":
             url = cfg.get("url")
             if not url:
@@ -114,30 +132,24 @@ def _build_notifiers(rt, alert: Alert) -> List:
             except UnsafeUrlError:
                 log.warning("skipping unvalidated webhook route for %s", alert.rule_type)
                 continue
-            notifiers.append(WebhookNotifier(url))
-            _cooldown.record(cd_key)
-        elif channel == "email":
+            built = WebhookNotifier(url)
+        else:
             try:
-                notifiers.append(build_notifier("email", cfg))
-                _cooldown.record(cd_key)
-            except Exception as exc:  # noqa: BLE001 - bad channel config
-                log.warning("skipping email route: %s", exc)
-        elif channel == "mqtt":
-            try:
-                notifiers.append(build_notifier("mqtt", cfg))
-                _cooldown.record(cd_key)
-            except Exception as exc:  # noqa: BLE001 - bad channel config / missing broker
-                log.warning("skipping mqtt route: %s", exc)
-        elif channel == "push":
-            try:
-                notifiers.append(build_notifier("push", cfg))
-                _cooldown.record(cd_key)
-            except Exception as exc:  # noqa: BLE001 - bad channel config / unreachable ntfy
-                log.warning("skipping push route: %s", exc)
+                built = build_notifier(channel, cfg)
+            except Exception as exc:
+                log.warning("skipping %s route: %s", channel, exc)
+        if built is None:
+            continue
+        if channel == "push":
+            push_route_matched = True
+        notifiers.append(built)
+        _cooldown.record(cd_key)
+    if not push_route_matched:
+        notifiers.append(PushNotifier())  # in-process capture fallback
     return notifiers
 
 
-_alert_queue: "queue.Queue" = queue.Queue()
+_alert_queue: queue.Queue = queue.Queue()
 
 
 def _alert_sender(rt, stop: threading.Event) -> None:
@@ -149,7 +161,7 @@ def _alert_sender(rt, stop: threading.Event) -> None:
             continue
         try:
             dispatch(alert, _build_notifiers(rt, alert))
-        except Exception:  # noqa: BLE001 - alerting must never crash the sender
+        except Exception:
             log.exception("alert dispatch failed")
 
 
@@ -157,33 +169,126 @@ def _retention_loop(rt, stop: threading.Event) -> None:
     while not stop.is_set():
         try:
             _sweep_retention(rt)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log.warning("retention sweep failed: %s", exc)
         stop.wait(3600)
 
 
 def _sweep_retention(rt) -> None:
-    """Delete expired recordings/events/snapshots per the configured policies."""
+    """Delete expired data per the configured retention policies.
+
+    Enforces every declared knob (recordings, events, snapshots, enrollment
+    embeddings, audit trail) plus expired refresh tokens, in short chunked
+    transactions so the sweep never holds long locks on PostgreSQL. Storage
+    objects (recordings, snapshots) are removed best-effort before their rows;
+    a failed storage delete logs and still drops the row so the DB never
+    re-attempts it forever.
+    """
     settings = rt.settings
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
+
+    def _ts(days: float) -> dt.datetime:
+        return now - dt.timedelta(days=days)
+
     with rt.SessionLocal() as s:
-        rec_cut = now - dt.timedelta(days=settings.retention_recordings_days)
-        for seg in s.query(VideoSegment).filter(VideoSegment.end_ts < rec_cut).all():
-            try:
-                rt.storage.delete(seg.storage_key)
-            except Exception:  # noqa: BLE001
-                pass
-            s.delete(seg)
-        ev_cut = now - dt.timedelta(days=settings.retention_events_days)
-        s.query(Event).filter(Event.timestamp_end < ev_cut).delete()
-        snap_cut = now - dt.timedelta(days=settings.retention_snapshots_days)
-        for snap in s.query(Snapshot).filter(Snapshot.created_at < snap_cut).all():
-            try:
-                rt.storage.delete(rt.crypto.decrypt_str(snap.storage_key_enc))
-            except Exception:  # noqa: BLE001
-                pass
-            s.delete(snap)
-        s.commit()
+        # ── recordings (chunked; storage delete best-effort) ──────────────
+        rec_cut = _ts(settings.retention_recordings_days)
+        while True:
+            segs = (
+                s.query(VideoSegment)
+                .filter(VideoSegment.end_ts < rec_cut)
+                .limit(_SWEEP_CHUNK)
+                .all()
+            )
+            if not segs:
+                break
+            for seg in segs:
+                try:
+                    rt.storage.delete(seg.storage_key)
+                except Exception as exc:
+                    log.warning("storage delete failed for %s: %s", seg.storage_key, exc)
+                s.delete(seg)
+            s.commit()
+
+        # ── events (bulk, chunked) ─────────────────────────────────────────
+        ev_cut = _ts(settings.retention_events_days)
+        while True:
+            deleted = (
+                s.query(Event)
+                .filter(Event.timestamp_end < ev_cut)
+                .limit(_SWEEP_CHUNK)
+                .with_for_update()
+                .delete(synchronize_session=False)
+            )
+            s.commit()
+            if not deleted:
+                break
+
+        # ── snapshots (storage delete best-effort, then row) ───────────────
+        snap_cut = _ts(settings.retention_snapshots_days)
+        while True:
+            snaps = (
+                s.query(Snapshot)
+                .filter(Snapshot.created_at < snap_cut)
+                .limit(_SWEEP_CHUNK)
+                .all()
+            )
+            if not snaps:
+                break
+            for snap in snaps:
+                try:
+                    rt.storage.delete(rt.crypto.decrypt_str(snap.storage_key_enc))
+                except Exception as exc:
+                    log.warning("snapshot storage delete failed: %s", exc)
+                s.delete(snap)
+            s.commit()
+
+        # ── enrollment embeddings (biometric data lifecycle) ───────────────
+        emb_cut = _ts(settings.retention_embeddings_days)
+        while True:
+            deleted = (
+                s.query(PersonEmbedding)
+                .filter(PersonEmbedding.created_at < emb_cut)
+                .limit(_SWEEP_CHUNK)
+                .with_for_update()
+                .delete(synchronize_session=False)
+            )
+            s.commit()
+            if not deleted:
+                break
+
+        # ── audit trail (bounded per RETENTION_AUDIT_DAYS) ────────────────
+        audit_cut = _ts(settings.retention_audit_days)
+        while True:
+            deleted = (
+                s.query(AuditLog)
+                .filter(AuditLog.ts < audit_cut)
+                .limit(_SWEEP_CHUNK)
+                .with_for_update()
+                .delete(synchronize_session=False)
+            )
+            s.commit()
+            if not deleted:
+                break
+
+        # ── expired refresh tokens ─────────────────────────────────────────
+        while True:
+            deleted = (
+                s.query(RefreshToken)
+                .filter(RefreshToken.expires_at < now)
+                .limit(_SWEEP_CHUNK)
+                .with_for_update()
+                .delete(synchronize_session=False)
+            )
+            s.commit()
+            if not deleted:
+                break
+
+
+# Rows removed per transaction during retention sweeps. Small on purpose:
+# each chunk commits and releases locks so concurrent API traffic is never
+# blocked behind a full-hour table scan.
+_SWEEP_CHUNK = 500
 
 
 def make_detector(settings: Settings, registry) -> Detector:
@@ -202,6 +307,18 @@ def build_make_source(camera: Camera, settings: Settings, crypto):
             return FFmpegFrameSource(plain, width=640, height=360, fps=settings.ai_inference_fps)
         return make
     return lambda: SyntheticFrameSource(fps=settings.ai_inference_fps)
+
+
+# Detail keys safe to serialize to third-party channels (webhook/email/MQTT).
+# Never includes ciphertext (plate_enc) or anything derived from biometrics;
+# consumers get the minimal operational context only.
+_ALERT_DETAIL_KEYS = ("direction", "dwell_sec", "count", "zone", "stationary_sec")
+
+
+def _safe_alert_detail(detail: dict | None) -> dict:
+    if not detail:
+        return {}
+    return {k: detail[k] for k in _ALERT_DETAIL_KEYS if k in detail}
 
 
 def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
@@ -231,10 +348,12 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
         identity_recognition_enabled=settings.ai_identity_recognition_enabled,
         rule_engine=rule_engine,
         anpr=anpr,
+        privacy_masks=camera.privacy_masks,
+        motion_gate_enabled=settings.ai_motion_gate_enabled,
     )
 
     # Main-stream recorder (only when a main URL is configured + recording on).
-    recorder: Optional[Recorder] = None
+    recorder: Recorder | None = None
     main_url = camera.stream_url_enc
     if settings.record_enabled and main_url:
         plain_main = rt.crypto.decrypt_str(main_url)
@@ -247,12 +366,12 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
         def _record_loop() -> None:
             while not stop.is_set():
                 try:
-                    seg = recorder.record_url(plain_main, dt_now())
+                    recorder.record_url(plain_main, dt_now())  # row tracked internally
                     proc = recorder.last_proc
                     if proc is not None:
                         try:
                             proc.wait()
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             pass
                     done = recorder.finalize_last()
                     if done is not None:
@@ -260,9 +379,9 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
                             with rt.SessionLocal() as s:
                                 s.add(done)
                                 s.commit()
-                        except Exception as exc:  # noqa: BLE001 - keep recording
+                        except Exception as exc:
                             log.warning("failed to persist segment for %s: %s", camera.id, exc)
-                except Exception as exc:  # noqa: BLE001 - recording must not kill analytics
+                except Exception as exc:
                     log.warning("recorder error for %s: %s", camera.id, exc)
                     stop.wait(2.0)
 
@@ -271,40 +390,76 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
     def make_source():
         return build_make_source(camera, settings, rt.crypto)()
 
-    gateway = StreamGateway(camera.id, make_source,
-                            on_status=lambda cid, st: log.info("camera %s -> %s", cid, st))
+    def _on_status(cid: str, st: str) -> None:
+        log.info("camera %s -> %s", cid, st)
+        # RECONNECTING/DISCONNECT states are the health signal the capacity
+        # planner and alerting depend on; emit as a counter.
+        if st in ("RECONNECTING", "DISCONNECTED", "OFFLINE"):
+            metrics.inc("camera_disconnects_total", labels=f'camera="{cid}"')
+        metrics.set("camera_status", 1.0 if st == "STREAMING" else 0.0,
+                    labels=f'camera="{cid}"')
+
+    gateway = StreamGateway(camera.id, make_source, on_status=_on_status)
     log.info("starting pipeline for camera %s (%s)", camera.id, camera.name)
+
+    # Rolling fps/latency bookkeeping for observability (declared in metrics.py,
+    # previously never emitted — see report D-3).
+    _fps_window: list[float] = []
+    _last_frame_ts: dt.datetime | None = None
+
     for frame, ts in gateway.iter_frames():
         if stop.is_set():
             break
+        t0 = time.perf_counter()
         session = rt.SessionLocal()
         try:
             events = pipeline.process_frame(session, frame, ts)
             session.commit()
+            metrics.inc("frames_processed", labels=f'camera="{camera.id}"')
+            if getattr(pipeline, "_last_analytic", []):
+                metrics.inc("analytic_events_total",
+                            amount=len(pipeline._last_analytic),
+                            labels=f'camera="{camera.id}"')
             for ev in events:
                 log.info("event %s cam=%s identity=%s", ev.id, ev.camera_id, ev.identity_status)
-            # Fan out point-in-time analytic events to alert channels.
+            # Fan out point-in-time analytic events to alert channels. Detail is
+            # filtered to the third-party-safe keys (no ciphertext leaves the host).
             for ae in getattr(pipeline, "_last_analytic", []):
                 alert = Alert(rule_id=ae.track_id or ae.event_type, rule_type=ae.event_type,
-                              camera_id=ae.camera_id, title=ae.event_type, message=str(ae.detail),
-                              detail=ae.detail, ts=ae.timestamp_start.isoformat() if ae.timestamp_start else None)
+                              camera_id=ae.camera_id, title=ae.event_type,
+                              message=str(_safe_alert_detail(ae.detail)),
+                              detail=_safe_alert_detail(ae.detail),
+                              ts=ae.timestamp_start.isoformat() if ae.timestamp_start else None)
                 try:
                     _alert_queue.put(alert)
-                except Exception:  # noqa: BLE001 - alerting must never crash the loop
+                except Exception:
                     log.exception("alert enqueue failed for %s", camera.id)
-        except Exception:  # noqa: BLE001 - one bad frame must not kill the camera loop
+        except Exception:
             session.rollback()
             log.exception("pipeline error for camera %s", camera.id)
+            metrics.inc("frames_dropped", labels=f'camera="{camera.id}"')
         finally:
             session.close()
+            # Per-frame processing latency and rolling fps.
+            metrics.observe("pipeline_latency_ms", (time.perf_counter() - t0) * 1000.0,
+                            labels=f'camera="{camera.id}"')
+            if _last_frame_ts is not None:
+                delta = (ts - _last_frame_ts).total_seconds()
+                if delta > 0:
+                    _fps_window.append(1.0 / delta)
+                    del _fps_window[:-30]  # keep last 30 samples
+                    if len(_fps_window) >= 5:
+                        metrics.set("camera_fps", sum(_fps_window) / len(_fps_window),
+                                    labels=f'camera="{camera.id}"')
+            _last_frame_ts = ts
+    metrics.set("camera_fps", 0.0, labels=f'camera="{camera.id}"')
 
     if recorder is not None:
         recorder.stop_all()
 
 
 def dt_now():
-    import datetime as dt
-    return dt.datetime.now(dt.timezone.utc)
+    return timeutil.utcnow()
 
 
 def main() -> None:
@@ -312,6 +467,15 @@ def main() -> None:
     configure_logging(settings.log_level)
     rt = build(settings)
     stop = threading.Event()
+
+    # Docker `stop` and systemd send SIGTERM; without a handler the daemon
+    # threads die mid-frame and ffmpeg children are reparented. Treat SIGTERM
+    # exactly like Ctrl-C so recorders flush and processes are reaped.
+    def _handle_sigterm(signum, frame):
+        stop.set()
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     threads = []
     with rt.SessionLocal() as session:
         cameras = session.query(Camera).all()

@@ -24,6 +24,13 @@ from packages.security.rbac import effective_permissions
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+# Fixed precomputed hash for nonexistent-account logins: verifying against a
+# CONSTANT hash (not a per-request re-hash) makes both login branches cost
+# exactly one Argon2 verify with identical parameters, eliminating the timing
+# oracle while halving real-login CPU.
+_DUMMY_HASH = hash_password("dummy-password-not-used")
+
+
 class LoginBody(BaseModel):
     email: str
     password: str
@@ -55,10 +62,12 @@ def login(body: LoginBody, request: Request, db: Session = Depends(get_db), rt: 
     ip = _client_ip(request)
     user = db.query(User).filter(User.email == body.email).first()
 
-    # Always run a password check path to reduce user-enumeration timing. If no
-    # user, verify against a dummy hash so timing is similar.
-    dummy = hash_password("dummy-password-not-used")
-    ok = verify_password(body.password, user.password_hash if user else dummy) if user else False
+    # User-enumeration hardening: ALWAYS run exactly one Argon2 verify against
+    # a fixed precomputed dummy hash when the account doesn't exist. Both
+    # branches then cost the same single verify, and recomputing the dummy
+    # per request (a fresh salt each time — ~47 ms of pure waste) is gone.
+    hashed = user.password_hash if user is not None else _DUMMY_HASH
+    ok = verify_password(body.password, hashed)
 
     if user and user.locked_until is not None:
         lu = user.locked_until

@@ -110,15 +110,19 @@ pip-audit
 
 ## Pull Request Checklist
 
-- [ ] `ruff check .` passes with no errors
+- [ ] `ruff check .` passes with no errors (`ruff.toml` defines the rule set)
 - [ ] `mypy packages apps` passes with no type errors
-- [ ] `pytest tests/ -v` passes (all 66+ tests green)
+- [ ] `pytest tests/ -v` passes (all 74+ tests green)
+- [ ] Regression test included for any bug fix — a fix without a test that
+      would have caught the bug will be sent back
 - [ ] `pip-audit` shows no critical/high vulnerabilities
 - [ ] Commit messages follow Conventional Commits
 - [ ] New features include tests
 - [ ] New API endpoints include use-case examples in the docs
 - [ ] Security-sensitive changes are reviewed by a team member
 - [ ] `docs/` updated if user-facing behavior changed
+- [ ] Read `AGENTS.md` invariants if touching: storage backends, the detection
+      pipeline, retention, subprocess handling, or the auth login path
 
 ## Code Review Expectations
 

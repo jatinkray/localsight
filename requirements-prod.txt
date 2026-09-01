@@ -1,0 +1,9 @@
+# LocalVision production (Docker Compose) dependencies.
+# Extends the base requirements with the PostgreSQL driver the compose stack
+# requires (DATABASE_URL=postgresql+psycopg://...) plus optional-but-expected
+# runtime pieces (psutil for /api/system gauges). The base requirements.txt
+# stays SQLite/minimal for local dev.
+-r requirements.txt
+
+psycopg[binary]==3.2.3
+psutil==6.1.0

@@ -6,7 +6,7 @@ from __future__ import annotations
 import datetime as dt
 import urllib.parse
 
-from packages.domain.models import Event, Person
+from packages.domain.models import Event
 from packages.security.mfa import current_code
 
 
@@ -18,7 +18,7 @@ def _admin(client):
 def _make_event(client, cam_id, identity_status="unknown", minutes_ago=10, label=None):
     rt = client.app.state.runtime
     with rt.SessionLocal() as s:
-        start = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes_ago)
+        start = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=minutes_ago)
         ev = Event(
             camera_id=cam_id, track_id="t1", identity_id=None, identity_status=identity_status,
             event_type="presence", timestamp_start=start,
@@ -54,7 +54,10 @@ def test_timeline_groups_events(client, admin_auth):
     r = client.post("/api/cameras", json={"name": "cam-t"}, headers=admin_auth)
     cam_id = r.json()["id"]
     _make_event(client, cam_id)
-    day = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    # Query by the event's own UTC day, not `now`: near the UTC midnight
+    # boundary the event (10 min ago) lands on yesterday's date and a
+    # "today" query finds nothing (observed flake at 23:59 UTC).
+    day = (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=10)).strftime("%Y-%m-%d")
     res = client.get(f"/api/timeline?date={day}&camera_id={cam_id}", headers=admin_auth)
     assert res.status_code == 200
     assert len(res.json()["timeline"]) >= 1
@@ -92,8 +95,8 @@ def test_signed_video_url_access(client, admin_auth):
     enc = rt.crypto.encrypt_str(key)
     with rt.SessionLocal() as s:
         ev = Event(camera_id=cam_id, track_id="t", identity_status="unknown", event_type="presence",
-                   timestamp_start=dt.datetime.now(dt.timezone.utc),
-                   timestamp_end=dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=1),
+                   timestamp_start=dt.datetime.now(dt.UTC),
+                   timestamp_end=dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1),
                    confidence=0.9, bbox={}, video_segment_key_enc=enc)
         s.add(ev)
         s.commit()

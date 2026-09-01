@@ -73,6 +73,12 @@ curl -X POST http://localhost:8000/api/persons/$ID/references \
 | GET | `/api/events/{id}/clip` | `events:export` (assembles all overlapping recording segments) |
 | GET | `/api/timeline?date=&camera_id=` | `events:view` (merged recording intervals + presence + markers) |
 | GET | `/api/events` (filtered) | `events:view` |
+| GET | `/api/alerts/events` | `events:view` (includes `detail` context per event) |
+
+Event rows carry a `detail` JSON column: rule events include `direction`,
+`dwell_sec`, `count`, `zone`; ANPR events include `plate_enc` (envelope-
+encrypted plate — decryptable only on the host) and `plate_hash` (anonymized
+correlation digest).
 
 ### Use case: Search events by camera and time range
 ```bash
@@ -165,6 +171,11 @@ curl -X PUT http://localhost:8000/api/cameras/$CAM/rules \
 | GET | `/api/live/streams` | `live:view` (health of active transcodes) |
 | POST | `/api/live/ticket` | `live:view` (issue short-lived camera-scoped ticket) |
 | GET | `/api/live/{camera_id}/play` | `live:view` (validate ticket, start LL-HLS transcode) |
+| POST | `/api/live/{camera_id}/stop` | `live:view` (stop transcode; dashboard control) |
+
+Transcodes are lifecycle-managed: streams idle for
+`LOCALVISION_LIVE_IDLE_TIMEOUT_SEC` (default 300 s) or older than
+`LOCALVISION_LIVE_MAX_DURATION_SEC` (default 4 h) are reaped automatically.
 
 ### Use case: Watch a live camera stream
 ```bash
@@ -185,7 +196,13 @@ curl "http://localhost:8000/api/live/$CAM/play?ticket=$TICKET" \
 ### Use case: Check which streams are actively transcoding
 ```bash
 curl http://localhost:8000/api/live/streams -H "Authorization: Bearer $TOKEN"
-# => {"active": [{"camera_id": "cam1", "running": true, "pid": 18427}], "count": 1}
+# => {"active": [{"camera_id": "cam1", "running": true, "pid": 18427, "idle_sec": 4}], "count": 1}
+```
+
+### Use case: Stop a stream when done watching
+```bash
+curl -X POST http://localhost:8000/api/live/$CAM/stop -H "Authorization: Bearer $TOKEN"
+# => {"camera_id": "cam1", "stopped": true}   (stopped=false when nothing was running)
 ```
 
 ## Analytics / BI
@@ -264,7 +281,11 @@ curl -X POST http://localhost:8000/api/alerts/routes \
 # MQTT message payload:
 # {"source": "localsight", "rule_id": "...", "rule_type": "anpr",
 #  "camera_id": "cam1", "severity": "info", "ts": "2026-03-01T14:23:01Z",
-#  "plate": "AB12XYZ", "detail": {...}}
+#  "message": "...", "detail": {"direction": ..., "dwell_sec": ...}}
+#
+# NOTE: `detail` is filtered to third-party-safe keys (direction, dwell_sec,
+# count, zone, stationary_sec). Encrypted plate material (plate_enc/plate_hash)
+# never leaves the host — only the host-side API can decrypt it.
 ```
 
 ### Use case: Push alerts to ntfy.sh for mobile notifications

@@ -5,6 +5,12 @@ to stream a camera's substream (LL-HLS/WebRTC) without exposing the RTSP URL or
 long-lived credentials to the client. Tickets are encrypted envelopes (carry their
 own expiry) and are verified on the play endpoint. This keeps the secure-boundary
 model: authn/authz is enforced server-side; the media gateway only honors valid tickets.
+
+Stream lifecycle (see docs/reviews/CODE_ANALYSIS_REPORT.md F-07): every transcode
+is tracked with its start time and the time the client last requested it. A reaper
+thread terminates streams that are idle beyond LIVE_IDLE_TIMEOUT_SEC or older than
+LIVE_MAX_DURATION_SEC, and reaps exited processes — ffmpeg never accumulates
+without bound, and viewers-closed-tab streams die instead of transcoding forever.
 """
 from __future__ import annotations
 
@@ -19,22 +25,85 @@ from sqlalchemy.orm import Session
 
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
+from apps.api.domain_live_cfg import LIVE_DIR, LIVE_IDLE_TIMEOUT_SEC, LIVE_MAX_DURATION_SEC
 from packages.domain.models import Camera
 from packages.observability.logging import logging as log
 
 router = APIRouter(prefix="/api", tags=["live"])
 
-# Live media is transcoded locally by ffmpeg into this directory, which is served
-# read-only at /live-media by the app factory. Keyed by camera_id.
-_LIVE_ROOT = os.environ.get("LOCALVISION_LIVE_DIR", "./data/live")
 _live_lock = threading.Lock()
-_live_streams: dict[str, "subprocess.Popen"] = {}
 
 
-def _start_stream(rt, camera, url: str) -> str | None:
+class _LiveStream:
+    __slots__ = ("proc", "started_ts", "last_probe_ts")
+
+    def __init__(self, proc: subprocess.Popen) -> None:
+        self.proc = proc
+        self.started_ts = dt.datetime.now(dt.timezone.utc)
+        self.last_probe_ts = self.started_ts
+
+
+_live_streams: dict[str, _LiveStream] = {}
+
+_reaper_started = False
+_reaper_lock = threading.Lock()
+
+
+def _terminate_and_reap(proc: subprocess.Popen) -> None:
+    """Terminate and wait so exited ffmpeg children never linger as zombies."""
+    if proc.poll() is None:
+        try:
+            proc.terminate()
+        except OSError:  # noqa: BLE001 - already dead
+            return
+    try:
+        proc.wait(timeout=5)
+    except Exception:  # noqa: BLE001 - best-effort reap
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def _ensure_reaper() -> None:
+    """Start the idle-reaper daemon once (lazily, on first stream)."""
+    global _reaper_started
+    if _reaper_started:
+        return
+    with _reaper_lock:
+        if _reaper_started:
+            return
+        _reaper_started = True
+
+        def _reap_loop() -> None:
+            while True:
+                threading.Event().wait(LIVE_IDLE_TIMEOUT_SEC)
+                now = dt.datetime.now(dt.timezone.utc)
+                with _live_lock:
+                    stale = []
+                    for cid, ls in _live_streams.items():
+                        idle_for = (now - ls.last_probe_ts).total_seconds()
+                        age = (now - ls.started_ts).total_seconds()
+                        if idle_for > LIVE_IDLE_TIMEOUT_SEC or age > LIVE_MAX_DURATION_SEC:
+                            stale.append((cid, ls, idle_for > LIVE_IDLE_TIMEOUT_SEC))
+                    for cid, ls, idle in stale:
+                        _live_streams.pop(cid, None)
+                for cid, ls, idle in stale:
+                    _terminate_and_reap(ls.proc)
+                    log.info(
+                        "live stream for %s stopped (%s)",
+                        cid, "idle" if idle else "max duration",
+                    )
+
+        threading.Thread(target=_reap_loop, name="live-reaper", daemon=True).start()
+
+
+def _start_stream(rt, camera, url: str) -> str:
     """Launch (or reuse) an ffmpeg LL-HLS transcode of the camera substream.
 
-    Returns the directory holding index.m3u8, or None if the transcode cannot start.
+    Returns the directory holding index.m3u8. Raises HTTPException(503) if the
+    transcode cannot start — the manifest must never be handed out for a
+    stream that isn't running.
     The operator-supplied URL is egress-validated first.
     """
     try:
@@ -43,17 +112,16 @@ def _start_stream(rt, camera, url: str) -> str | None:
         validate_egress_url(url, allowlist=rt.settings.ssrf_allowlist_cidrs)
     except Exception as exc:  # noqa: BLE001 - unsafe destination
         raise HTTPException(status_code=400, detail=f"unsafe stream URL: {exc}")
-    os.makedirs(_LIVE_ROOT, exist_ok=True)
-    out_dir = os.path.join(_LIVE_ROOT, camera.id)
+    os.makedirs(LIVE_DIR, exist_ok=True)
+    out_dir = os.path.join(LIVE_DIR, camera.id)
     with _live_lock:
         existing = _live_streams.get(camera.id)
-        if existing is not None and existing.poll() is None:
-            return out_dir  # already streaming
         if existing is not None:
-            try:
-                existing.terminate()
-            except Exception:  # noqa: BLE001
-                pass
+            if existing.proc.poll() is None:
+                existing.last_probe_ts = dt.datetime.now(dt.timezone.utc)
+                return out_dir  # already streaming; viewer still watching
+            _live_streams.pop(camera.id, None)
+            _terminate_and_reap(existing.proc)
     os.makedirs(out_dir, exist_ok=True)
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
@@ -65,40 +133,75 @@ def _start_stream(rt, camera, url: str) -> str | None:
         os.path.join(out_dir, "index.m3u8"),
     ]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Own process group so terminate() hits ffmpeg cleanly even under a
+        # supervising shell, and so its children don't outlive the API restart.
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     except (OSError, ValueError) as exc:
-        # ffmpeg unavailable: degrade gracefully (manifest path still returned; the
-        # gateway will produce media wherever ffmpeg is installed).
-        log.warning("live transcode failed to start for %s: %s", camera.id, exc)
-        return out_dir
+        # No ffmpeg / bad argv: fail loudly. Returning a manifest that will
+        # never exist makes the dashboard show a permanently dead player.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"live transcode failed to start: {exc}",
+        ) from exc
     with _live_lock:
-        _live_streams[camera.id] = proc
+        _live_streams[camera.id] = _LiveStream(proc)
+    _ensure_reaper()
     return out_dir
 
 
-def _stop_stream(camera_id: str) -> None:
+def _stop_stream(camera_id: str) -> bool:
     with _live_lock:
-        proc = _live_streams.pop(camera_id, None)
-    if proc is not None and proc.poll() is None:
-        try:
-            proc.terminate()
-        except Exception:  # noqa: BLE001
-                pass
+        ls = _live_streams.pop(camera_id, None)
+    if ls is None:
+        return False
+    _terminate_and_reap(ls.proc)
+    return True
+
+
+def shutdown_live_streams() -> None:
+    """Stop every transcode (called on app shutdown so ffmpeg doesn't orphan)."""
+    with _live_lock:
+        streams = list(_live_streams.values())
+        _live_streams.clear()
+    for ls in streams:
+        _terminate_and_reap(ls.proc)
 
 
 @router.get("/live/streams", dependencies=[Depends(require_permission("live:view"))])
 def live_streams():
     """Return the currently active live transcodes (presence/health).
 
-    Each entry reports whether the ffmpeg process is still running and its PID,
-    so the dashboard can render live indicators and detect dead streams. Dead
-    (exited) processes are filtered out.
+    Each entry reports whether the ffmpeg process is still running, its PID,
+    and how long ago the client last requested it — dead processes are dropped
+    and idle streams report themselves ahead of the reaper.
     """
+    now = dt.datetime.now(dt.timezone.utc)
     active = []
-    for camera_id, proc in _live_streams.items():
-        if proc.poll() is None:
-            active.append({"camera_id": camera_id, "running": True, "pid": proc.pid})
+    with _live_lock:
+        for camera_id, ls in _live_streams.items():
+            if ls.proc.poll() is not None:
+                continue
+            active.append({
+                "camera_id": camera_id,
+                "running": True,
+                "pid": ls.proc.pid,
+                "idle_sec": int((now - ls.last_probe_ts).total_seconds()),
+            })
     return {"active": active, "count": len(active)}
+
+
+@router.post("/live/{camera_id}/stop", dependencies=[Depends(require_permission("live:view"))])
+def stop_stream(camera_id: str):
+    """Explicitly stop a camera's live transcode (dashboard 'stop' control).
+
+    Returns 200 with `stopped: false` when no transcode was running — the
+    end state (nothing streaming) is what the caller wants either way.
+    """
+    stopped = _stop_stream(camera_id)
+    return {"camera_id": camera_id, "stopped": stopped}
 
 
 class TicketRequest(BaseModel):
@@ -146,12 +249,7 @@ def play(camera_id: str, ticket: str, db: Session = Depends(get_db),
     manifest = f"/live-media/{camera_id}/index.m3u8"
     url_enc = cam.substream_url_enc
     if url_enc:
-        try:
-            out_dir = _start_stream(rt, cam, rt.crypto.decrypt_str(url_enc))
-        except HTTPException:
-            raise
-        if out_dir is None:
-            raise HTTPException(status_code=502, detail="failed to start live stream")
+        _start_stream(rt, cam, rt.crypto.decrypt_str(url_enc))
     return {
         "camera_id": camera_id,
         "hls_manifest": manifest,

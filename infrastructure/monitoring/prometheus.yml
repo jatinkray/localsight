@@ -1,5 +1,10 @@
 # Minimal Prometheus scrape config for LocalVision.
 # Metrics are exposed by the API at /api/system/metrics in Prometheus text format.
+#
+# The endpoint requires auth (session OR a static bearer token). Point
+# METRICS_SCRAPE_TOKEN below at the token you set on the api/worker services
+# (docker-compose environment: METRICS_SCRAPE_TOKEN=...) — without it every
+# scrape returns 401 and the dashboards stay empty.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -7,11 +12,17 @@ global:
 scrape_configs:
   - job_name: localvision-api
     metrics_path: /api/system/metrics
+    authorization:
+      type: Bearer
+      credentials: ${METRICS_SCRAPE_TOKEN}
     static_configs:
       - targets: ["api:8000"]
   - job_name: localvision-worker
-    # The worker can expose metrics on its own port in production; for now it
-    # shares the API's endpoint.
+    # The worker shares the API's metrics endpoint (in-process registry);
+    # both jobs carry the scrape token.
     metrics_path: /api/system/metrics
+    authorization:
+      type: Bearer
+      credentials: ${METRICS_SCRAPE_TOKEN}
     static_configs:
       - targets: ["api:8000"]
