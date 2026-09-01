@@ -1,0 +1,30 @@
+# Never bake into the image: secrets, local DBs, virtualenv, build artifacts.
+# The build context is COPY'd into the image, so anything not excluded here
+# ships inside every pushed layer (see docs/reviews/CODE_ANALYSIS_REPORT.md F-12).
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+data/
+.venv/
+venv/
+.git/
+.gitignore
+.github/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+.coverage
+coverage.xml
+htmlcov/
+docs/
+tests/
+ui/node_modules/
+*.egg-info/
+.venv*
+.idea/
+.vscode/
+*.log
