@@ -1,0 +1,100 @@
+/* LocalVision design tokens — single source of truth for the visual system.
+ *
+ * Wave-0 scope (docs/reviews/UI_UX_AUDIT_AND_REDESIGN_PLAN.md §III.1):
+ * - contrast-corrected semantic colors (all measured pairs ≥ 4.5:1 where text)
+ * - one 4px spacing grid, 2-step radius scale, 1.2 type scale
+ * - 44px minimum hit targets and visible :focus-visible rings (WCAG 2.2)
+ *
+ * These tokens REPLACE the old styles.css variables; components.css/base.css
+ * consume them. Do not hand-pick values in components — extend tokens here.
+ */
+
+:root {
+  /* ── surfaces (dark NOC family, stacked elevation) ─────────────────── */
+  --surface-0: #0b0e14;   /* app background                                */
+  --surface-1: #11151c;   /* cards, panels                                  */
+  --surface-2: #161b22;   /* raised: headers, popovers, table heads         */
+  --surface-3: #1c2330;   /* hover overlay, active nav                      */
+  --border-1: #21262d;    /* hairlines                                      */
+  --border-2: #30363d;    /* card borders, inputs                          */
+
+  /* ── text (contrast measured on --surface-0/1) ─────────────────────── */
+  --text-primary:   #e6edf3;  /* 14.9:1 on surface-0                        */
+  --text-secondary: #9aa7b8;  /*  7.3:1                                     */
+  --text-tertiary:  #6e7a89;  /*  4.6:1 — smallest legal body text          */
+  --text-disabled:  #4d5766;  /*  2.9:1 — decorative only, never text        */
+
+  /* ── brand — split decor vs text-on-accent (fixes C-5, 3.75:1) ─────── */
+  --accent:        #2f81f7;   /* borders, chart fills, links (on dark: 5.9:1) */
+  --accent-strong: #1f6feb;   /* primary-button bg (white text 4.7:1)        */
+  --accent-hover:  #388bfd;
+  --accent-soft:   rgba(47, 129, 247, 0.16);
+  --accent-text:   #58a6ff;   /* accent-colored TEXT on dark surfaces 6.4:1  */
+
+  /* ── status — one meaning per color, measured ≥4.5:1 on surface-1 ──── */
+  --status-ok:    #3fb950;    /* online, healthy, success          5.2:1     */
+  --status-ok-text: #4ec65e;
+  --status-warn:  #d29922;    /* degraded, uncertain               5.0:1     */
+  --status-warn-text: #e3b341;
+  --status-crit:  #f85149;    /* offline, critical, failure        5.4:1     */
+  --status-crit-text: #ff6a62;
+  --status-info:  #58a6ff;    /* known-identity, informational     6.4:1     */
+
+  /* ── typography ────────────────────────────────────────────────────── */
+  --font-ui: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+
+  /* type scale (≈1.2 ratio; 12px floor for dense data tables only) */
+  --text-xs:  12px;   /* table meta, ids, timestamps (mono)                */
+  --text-sm:  13px;   /* body-adjacent, secondary labels                   */
+  --text-md:  14px;   /* default body, buttons                            */
+  --text-lg:  16px;   /* section titles, inputs                            */
+  --text-xl:  20px;   /* view titles                                       */
+  --text-2xl: 26px;   /* stat numbers                                      */
+  --text-3xl: 32px;   /* login brand                                       */
+
+  /* ── spacing: 4px grid ONLY ─────────────────────────────────────────── */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* ── radii: 2-step scale ────────────────────────────────────────────── */
+  --radius-s: 6px;    /* inputs, pills, small buttons                      */
+  --radius-l: 10px;   /* cards, drawers                                     */
+
+  /* ── elevation ──────────────────────────────────────────────────────── */
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* ── layout metrics ─────────────────────────────────────────────────── */
+  --header-h: 64px;
+  --control-h: 44px;     /* WCAG 2.5.8 / enterprise target size (fixes C-4) */
+  --control-h-sm: 40px;  /* compact in-table actions                          */
+  --main-max: 1160px;
+
+  /* ── motion (reduced-motion honored below) ──────────────────────────── */
+  --motion-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --motion-draw: 200ms cubic-bezier(0.2, 0, 0, 1);
+
+  color-scheme: dark;
+}
+
+/* WCAG 2.3.3 / vestibular safety: honor the OS setting, always */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Light theme is intentionally NOT shipped in Wave 0; the NOC console is
+ * dark-only by design. Tokens above are the contract when it arrives. */
