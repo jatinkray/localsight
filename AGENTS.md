@@ -169,10 +169,18 @@ code looks the way it does now.
 
 `docs/reviews/UI_UX_AUDIT_AND_REDESIGN_PLAN.md` is the UI/UX counterpart:
 a Playwright-measured audit (findings C-1 … C-14) and the phased enterprise
-redesign. Waves 0 (trust repairs) and 1 (investigation loop) are DONE;
-Wave 2 (Monitor: live grid + wall mode, auto-refreshing overview) builds on
-their `ui/core/` + `ui/views/` structure. Later waves (manage screens,
-analytics) follow the same pattern. The
+redesign. Waves 0 (trust repairs), 1 (investigation loop), 2 (Monitor:
+live grid + wall mode, auto-refreshing overview), and 3 (Manage: camera
+grid + detail tabs, mask/rules editors, add-camera wizard, identities,
+alerts admin, users, privacy dashboard) are DONE. Wave 4 (analytics &
+polish) follows the same pattern. Each wave ships its own Playwright probe:
+`scripts/ui_probe_flows.py` (W0), `ui_probe_wave1.py`, `ui_probe_wave2.py`,
+`ui_probe_wave3.py` — run the matching probe for any view you touch; they
+are self-provisioning (create their own throwaway users) and assert the
+audit findings stay fixed. Frontend conventions for new views live in
+`ui/WAVE3_CONVENTIONS.md` (CSP-safe SVG geometry, h()/render() DOM
+construction, RBAC gating, honest empty/error states, write-only
+credentials, typed-confirm deletes). The
 audit scripts reproduce any finding: `scripts/ui_audit.py`,
 `scripts/ui_design_metrics.py`, `scripts/ui_probe_flows.py` (see the report's
 Appendix B).

@@ -5,7 +5,7 @@
 // The shell only wires chrome (nav, login, logout) and boots the session.
 
 import { $ } from "./core/dom.js";
-import { api, restoreSession, logout as apiLogout, hasSession, startRefreshLoop, onAuthEvent } from "./core/api.js";
+import { api, can, restoreSession, logout as apiLogout, hasSession, startRefreshLoop, onAuthEvent } from "./core/api.js";
 import { toast } from "./core/toast.js";
 import { onView, navigate, start as startRouter } from "./core/router.js";
 import { openEventDrawer, requestClose } from "./views/event_drawer.js";
@@ -15,8 +15,11 @@ import { loadCameras } from "./views/cameras.js";
 import { loadEvents, wireEventsView } from "./views/events.js";
 import { loadTimeline } from "./views/timeline.js";
 import { loadLive, wireLiveView } from "./views/live.js";
-import { loadPeople, wireEnrollForm } from "./views/people.js";
+import { loadPeople } from "./views/people.js";
 import { loadAudit } from "./views/audit.js";
+import { loadAlertsAdmin } from "./views/alerts_admin.js";
+import { loadUsers } from "./views/users.js";
+import { loadPrivacy } from "./views/privacy.js";
 
 function showPanels(view) {
   document.querySelectorAll("#nav button").forEach((b) => {
@@ -58,9 +61,9 @@ onView("live", (params) => {
     }, 600);
   }
 });
-onView("cameras", () => {
+onView("cameras", (params) => {
   showPanels("cameras");
-  loadCameras($("#cameras-list"));
+  loadCameras($("#cameras-list"), params);
 });
 onView("events", (params, eventId) => {
   showPanels("events");
@@ -77,9 +80,21 @@ onView("timeline", (params) => {
     cameraId: params.camera || $("#tl-camera").value.trim() || undefined,
   });
 });
-onView("people", () => {
+onView("people", (params) => {
   showPanels("people");
-  loadPeople($("#people-list"));
+  loadPeople($("#people-list"), params);
+});
+onView("alerts", (params) => {
+  showPanels("alerts");
+  loadAlertsAdmin($("#alerts-admin-list"), params);
+});
+onView("users", (params) => {
+  showPanels("users");
+  loadUsers($("#users-list"), params);
+});
+onView("privacy", () => {
+  showPanels("privacy");
+  loadPrivacy($("#privacy-list"));
 });
 onView("audit", () => {
   showPanels("audit");
@@ -89,7 +104,24 @@ onView("audit", () => {
 function enterApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  applyRbacGates();
   startRouter(); // resolve #/ — lands on the URL's view (or dashboard)
+}
+
+/** Hide chrome the current role can't use. Runs after the session (and
+ *  therefore /api/auth/me — the can() source) is live. */
+function applyRbacGates() {
+  const gate = (sel, perm) => {
+    const el = $(sel);
+    if (el) el.classList.toggle("hidden", !can(perm));
+  };
+  gate("#add-camera", "camera:configure");
+  gate("#person-add", "person:enroll");
+  gate("#route-add", "alerts:manage");
+  document.querySelectorAll('#nav button[data-view="alerts"]')
+    .forEach((b) => b.classList.toggle("hidden", !can("alerts:manage")));
+  document.querySelectorAll('#nav button[data-view="users"]')
+    .forEach((b) => b.classList.toggle("hidden", !can("user:manage")));
 }
 
 function leaveApp({ notice = null } = {}) {
@@ -114,6 +146,11 @@ async function boot() {
   });
   wireEventsView($("#events-wrap"));
   wireLiveView($("#live-out"), $("#live-toolbar"));
+
+  $("#add-camera").addEventListener("click", () => navigate("cameras", { id: "new" }));
+  $("#person-add").addEventListener("click", () => navigate("people", { new: "1" }));
+  $("#route-add").addEventListener("click", () => navigate("alerts", { new: "1" }));
+
   startAutoRefresh(() => {
     // refresh the Overview whenever it's the visible view (auto-refresh
     // pauses itself when the tab is hidden — visibilitychange listener
@@ -134,7 +171,6 @@ async function boot() {
       camera: $("#tl-camera").value.trim() || undefined,
     });
   });
-  wireEnrollForm($("#person-form"), $("#people-list"));
   $("#audit-load").addEventListener("click", () => navigate("audit"));
 
   onAuthEvent((ev) => {

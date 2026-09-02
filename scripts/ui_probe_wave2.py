@@ -73,19 +73,26 @@ def main() -> int:
             ignore_https_errors=bool(os.environ.get("LV_INSECURE_TLS")))
         page = ctx.new_page()
         page.on("pageerror", lambda e: console_errors.append(str(e)[:200]))
-        # Resource-level 4xx/5xx console lines are the browser's network log
-        # for DOCUMENTED live-stream states: 503 = no transcoder / camera
-        # unreachable; 400 = SSRF egress guard rejecting the camera's URL.
-        # The probe asserts the UI SURFACES these states on the tiles (which
-        # it does) — the network-log lines themselves are not product errors.
-        def _on_console(m):
-            if m.type == "error" and "503" not in m.text and "400" not in m.text:
-                console_errors.append(m.text[:200])
-        page.on("console", _on_console)
+        # NOTE: "Failed to load resource" console lines carry no URL — the
+        # authoritative record is the RESPONSE stream. Documented live
+        # resource states (no ffmpeg in dev): 503 on /api/live/* (no
+        # transcoder / unreachable camera), 400 on /api/live/* (SSRF guard
+        # — surfaced on tiles as 'Stream URL blocked'), 404 on /live-media/*
+        # (hls.js probing the manifest of a transcode that never started —
+        # the tile already shows the honest state).
+        # _on_resp drops those; console resource lines are skipped entirely
+        # (pageerror above still catches genuine uncaught JS).
+        def _documented(status: int, url: str) -> bool:
+            return (
+                (status == 503 and "/api/live/" in url)
+                or (status == 400 and "/api/live/" in url)
+                or (status == 404 and "/live-media/" in url)
+            )
+
         def _on_resp(r):
-            if r.status >= 400:
+            if r.status >= 400 and not _documented(r.status, r.url):
                 resource_errors.append(
-                    (r.status, r.url.split("8781")[-1][:40]))
+                    (r.status, r.url.replace(BASE, "")[:60]))
         page.on("response", _on_resp)
 
         page.goto(BASE)

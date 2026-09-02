@@ -10,7 +10,6 @@ Security notes:
 """
 from __future__ import annotations
 
-import datetime as dt
 from urllib.parse import urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -20,13 +19,13 @@ from sqlalchemy.orm import Session
 from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
-from packages.domain.models import Camera, NvrDevice, Snapshot, User, VideoSegment
+from packages.domain.models import Camera, NvrDevice, Snapshot, VideoSegment
 from packages.domain.schemas import TPLinkNvrSeed
 from packages.security.crypto import CryptoBox
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
-from packages.video import tplink
 from packages.video import presets as vendor_presets
+from packages.video import tplink
 from packages.video.onvif import OnvifClient
 
 router = APIRouter(prefix="/api", tags=["cameras"])
@@ -282,6 +281,122 @@ def get_camera(camera_id: str, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/cameras/{camera_id}/snapshot-url", dependencies=[Depends(require_permission("camera:view"))])
+def camera_snapshot_url(camera_id: str, db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)):
+    """Mint a short-lived signed URL for the snapshot endpoint.
+
+    The mask editor's <img> cannot carry the in-memory bearer token (the
+    browser attaches no Authorization header to image loads), so the frame
+    is fetched with an HMAC-signed query instead — same scheme the storage
+    layer uses for event media (exp + sig over "camera-snapshot:{id}"),
+    300 s lifetime, constant-time comparison.
+    """
+    import hashlib
+    import hmac as hmac_mod
+    import time as time_mod
+
+    cam = db.get(Camera, camera_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="camera not found")
+    key = f"camera-snapshot:{camera_id}"
+    exp = int(time_mod.time()) + 300
+    msg = f"{key}:{exp}".encode()
+    mac = hmac_mod.new(rt.settings.master_encryption_key.encode(), msg, hashlib.sha256)
+    return {"url": f"/api/cameras/{camera_id}/snapshot?exp={exp}&sig={mac.hexdigest()}",
+            "expires_at": exp}
+
+
+@router.get("/cameras/{camera_id}/snapshot")
+def camera_snapshot(request: Request, camera_id: str, db: Session = Depends(get_db),
+                    rt: Runtime = Depends(get_runtime), exp: str = "", sig: str = ""):
+    """One JPEG frame from the camera — for the privacy-mask editor canvas,
+    add-camera verification, and live-tile posters.
+
+    Reads at most one frame via a one-shot ffmpeg argv (no shell, validated
+    URL, terminated AND reaped). Honest failure modes, no fake frames:
+      * 404 camera unknown
+      * 409 no stream URL configured
+      * 503 stream unreachable / ffmpeg missing (or no frame within timeout)
+
+    Auth (either):
+      * a session bearer token with camera:view, OR
+      * the signed exp/sig pair minted by /snapshot-url — <img> loads can't
+        send Authorization headers, so the canvas uses the signed form.
+    """
+    import hashlib
+    import hmac as hmac_mod
+    import subprocess
+    import time as time_mod
+
+    cam = db.get(Camera, camera_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    # ── auth: session token OR valid signature ──────────────────────────
+    authorized = False
+    authz = request.headers.get("Authorization", "")
+    if authz.startswith("Bearer "):
+        try:
+            get_current_user(request, db)  # raises 401 itself if invalid
+            authorized = "camera:view" in getattr(request.state, "permissions", set())
+        except HTTPException:
+            authorized = False
+    if not authorized and exp and sig:
+        try:
+            exp_i = int(exp)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bad exp") from None
+        if exp_i < int(time_mod.time()):
+            raise HTTPException(status_code=410, detail="signed URL expired")
+        key = f"camera-snapshot:{camera_id}"
+        expected = hmac_mod.new(rt.settings.master_encryption_key.encode(),
+                                f"{key}:{exp_i}".encode(), hashlib.sha256).hexdigest()
+        if hmac_mod.compare_digest(expected, sig):
+            authorized = True
+    if not authorized:
+        raise HTTPException(status_code=401,
+                            detail="camera snapshot needs a session or a signed URL")
+
+    url_enc = cam.substream_url_enc or cam.stream_url_enc
+    if not url_enc:
+        raise HTTPException(status_code=409, detail="no stream URL configured")
+    url = rt.crypto.decrypt_str(url_enc)
+    # Re-validate on use (the stored URL passed validation at write time; this
+    # is the standing defense-in-depth rule for every egress call site).
+    try:
+        validate_egress_url(url, allowlist=rt.settings.ssrf_allowlist_cidrs)
+    except UnsafeUrlError as exc:
+        raise HTTPException(status_code=400, detail=f"stream url rejected: {exc}") from exc
+
+    args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+            "-rtsp_transport", "tcp", "-i", url,
+            "-an", "-frames:v", "1",
+            "-f", "image2", "-vcodec", "mjpeg", "-"]
+    try:
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="ffmpeg unavailable") from exc
+    try:
+        # Bounded wait: an unreachable RTSP host can hold the TCP handshake
+        # for minutes; the mask editor needs an answer, not a hung request.
+        frame, _ = proc.communicate(timeout=10)
+    except subprocess.TimeoutExpired as exc:
+        proc.kill()
+        proc.wait(timeout=5)
+        raise HTTPException(status_code=503, detail="camera unreachable (timeout)") from exc
+    except Exception as exc:
+        proc.kill()
+        proc.wait(timeout=5)
+        raise HTTPException(status_code=503, detail="snapshot failed") from exc
+    # A JPEG starts with the SOI marker; a timeout/unreachable camera yields
+    # an empty or non-JPEG buffer.
+    if not frame.startswith(b"\xff\xd8"):
+        raise HTTPException(status_code=503, detail="camera unreachable (no frame)")
+    from fastapi import Response as FastAPIResponse
+    return FastAPIResponse(content=frame, media_type="image/jpeg")
+
+
 @router.put("/cameras/{camera_id}", dependencies=[Depends(require_permission("camera:configure"))])
 def update_camera(camera_id: str, body: dict, request: Request, db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)):
     cam = db.get(Camera, camera_id)
@@ -290,10 +405,10 @@ def update_camera(camera_id: str, body: dict, request: Request, db: Session = De
     for f in ("name", "resolution", "fps", "timezone", "privacy_masks", "retention"):
         if f in body:
             setattr(cam, f, body[f])
-    if "stream_url" in body and body["stream_url"]:
+    if body.get("stream_url"):
         validate_egress_url(body["stream_url"], allowlist=rt.settings.ssrf_allowlist_cidrs)
         cam.stream_url_enc = rt.crypto.encrypt_str(body["stream_url"])
-    if "substream_url" in body and body["substream_url"]:
+    if body.get("substream_url"):
         validate_egress_url(body["substream_url"], allowlist=rt.settings.ssrf_allowlist_cidrs)
         cam.substream_url_enc = rt.crypto.encrypt_str(body["substream_url"])
     write_audit(db, user=request.state.user, action="camera.update", resource=camera_id,
@@ -318,7 +433,7 @@ def delete_camera(camera_id: str, request: Request, db: Session = Depends(get_db
     for row in db.query(Snapshot.storage_key_enc).filter(Snapshot.camera_id == camera_id).all():
         try:
             snap_keys.append(rt.crypto.decrypt_str(row[0]))
-        except Exception:  # noqa: BLE001 - undecryptable ref: row still deletes
+        except Exception:
             continue
     db.delete(cam)
     write_audit(db, user=request.state.user, action="camera.delete", resource=camera_id,
@@ -327,6 +442,6 @@ def delete_camera(camera_id: str, request: Request, db: Session = Depends(get_db
     for key in seg_keys + snap_keys:
         try:
             rt.storage.delete(key)
-        except Exception:  # noqa: BLE001 - media cleanup must not fail the delete
+        except Exception:
             pass
     return {"ok": True}

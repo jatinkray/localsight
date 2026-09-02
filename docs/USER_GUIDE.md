@@ -11,13 +11,18 @@ see `AGENTS.md`; for operations (deployment, retention, troubleshooting) see
 2. [Dashboards at a glance](#dashboards-at-a-glance)
 3. [Managing cameras](#managing-cameras)
    - [Privacy masks](#privacy-masks)
+   - [The Cameras screens (Wave 3)](#the-cameras-screens-wave-3)
+   - [The mask editor](#the-mask-editor)
+   - [The rules editor](#the-rules-editor)
    - [Behavior rules](#behavior-rules)
    - [Per-camera retention](#per-camera-retention)
 4. [Live view](#live-view)
 5. [Events, search & clips](#events-search--clips)
-6. [Alerts](#alerts)
-7. [People & enrollment](#people--enrollment)
-8. [What is encrypted, and where](#what-is-encrypted-and-where)
+6. [Alerts](#alerts) — incl. the [Alerts screen](#the-alerts-screen-wave-3)
+7. [People & enrollment](#people--enrollment) — incl. the
+   [Identities screen](#the-identities-screen-wave-3)
+8. [Users & the Privacy dashboard (Wave 3)](#users--the-privacy-dashboard-wave-3)
+9. [What is encrypted, and where](#what-is-encrypted-and-where)
 
 ---
 
@@ -96,6 +101,56 @@ the fence, a monitor screen in view.
 **Verify masks took effect**: the change applies to new frames immediately
 (worker picks it up on camera reload); run a test detection and confirm no
 events appear from the masked region.
+
+### The Cameras screens (Wave 3)
+
+`Cameras` in the left navigation is now a full management surface for
+operators with `camera:view` (management actions additionally require
+`camera:configure`; read-only roles see the same screens without edit
+controls — the UI hides what you may not do, it never shows you a button
+that will 403):
+
+- **Grid** — every camera as a card: live status, resolution, FPS, health,
+  and the count of active privacy masks. Click a card for its detail view.
+- **Detail tabs** — Streams, Masks, Rules, Retention, Health:
+  - *Streams*: primary + substream URLs. These are **write-only**: the
+    field shows `🔒 encrypted — write-only`, existing URLs are never
+    echoed back. Enter a new URL only to replace it.
+  - *Masks*: the visual mask editor (below).
+  - *Rules*: the visual rules editor (below).
+  - *Retention*: per-camera day counts (blank = system default, which the
+    card states explicitly — the UI never invents a number the backend
+    didn't declare).
+  - *Health*: FPS, drop rate, last-seen worker heartbeat.
+- **+ Add camera** — a three-step wizard: ONVIF discovery (or manual RTSP
+  entry) → credentials → **verify**, which attempts to pull one real frame
+  before you commit. If the camera is unreachable you see the honest
+  failure (e.g. `503 — stream unreachable`) and can fix the URL instead of
+  discovering a dead camera a day later.
+
+### The mask editor
+
+On a camera's Masks tab, drag on the snapshot to draw a rectangle, pick a
+**reason** (compliance record — required), then Add. Reasons are the audit
+trail for *why* a region is excluded: neighbor's property, public sidewalk,
+no consent for this area, and so on. The editor draws on the camera's live
+snapshot when available; if the camera is offline it says so and stays
+editable (coordinates are normalized, so masks re-anchor on any
+resolution).
+
+Snapshots for the canvas are fetched through **short-lived signed URLs**
+(300 s) — the same scheme as event media, because browser image loads
+cannot carry your session token.
+
+### The rules editor
+
+On the Rules tab: pick a rule type, click on the snapshot to place points
+(two points for a tripwire, three or more for a zone polygon — it closes
+itself), set the per-type threshold (dwell seconds, direction, count),
+then Add rule → Save. Saving **replaces** the camera's rule list; the
+editor warns when the camera carries legacy/unknown rules so the replace is
+never a silent surprise. Every rule is validated against the same schema
+the worker enforces before the save leaves your browser.
 
 ### Behavior rules
 
@@ -204,6 +259,23 @@ scope, and `cooldown_sec` to suppress re-firing storms.
 - `POST /api/alerts/test` sends a synthetic alert through every configured
   route so you can verify delivery end-to-end.
 
+### The Alerts screen (Wave 3)
+
+The Alerts view (operators and up) has three parts:
+
+- **Routes table** — one row per route: channel pill, rule type, camera
+  scope (or *all cameras*), cooldown, enabled/paused state. **Test-fire**
+  pushes a synthetic alert through that route; **Delete** is two-step.
+- **Deliveries feed** — the last deliveries with timestamps, so you can see
+  the route actually firing, not just configured.
+- **+ Add route** — the create form. The `config` JSON field shows a
+  per-channel hint (a webhook wants `{"url": ...}`, email wants an address)
+  and a note that channel secrets are write-only, like every credential in
+  the product.
+
+*(Honesty note: pausing a route currently requires editing its config file
+and reloading — the pause control tells you this rather than pretending.)*
+
 ## People & enrollment
 
 Enrollment (biometric identity recognition) is **off by default** and should
@@ -219,6 +291,50 @@ be enabled only with a lawful basis. When enabled:
 Deleting a person is a **complete erasure** (GDPR-style): their embeddings
 cascade-delete with the person row. Events keep their `identity_status` label
 but the link to the person is removed.
+
+### The Identities screen (Wave 3)
+
+The People view (renamed *Identities* in the nav) lists every enrolled
+person with their **faces-enrolled count**, status, and enrollment date —
+camera-count chips make the enrollment effort visible at a glance.
+
+The person detail shows each reference embedding's **metadata only**:
+model version, dimension, quality score, created date. The photo itself is
+never stored (only the embedding), and the API says so in plain text rather
+than hiding it.
+
+- **Upload a reference photo** — multipart upload; the server extracts the
+  embedding and discards the image bytes. Re-uploading appends a new
+  reference (more references = better matching).
+- **Delete person** — the typed-confirm pattern: type the person's exact
+  label to unlock the button, because this is a full GDPR erasure
+  (embeddings cascade) and deserves a speed bump.
+
+## Users & the Privacy dashboard (Wave 3)
+
+### Users
+
+The Users view (`user:manage`, admins) lists accounts with role, MFA state,
+and active status. Creating a user enforces the 12-character minimum password
+(hashed with Argon2id on the host). **Delete** is typed-confirm on the
+account's exact email — and it revokes all their sessions immediately, which
+the confirm zone says out loud. Your own row is marked `· you` and cannot
+be deleted from the UI. The roles legend maps each role to its permissions
+(from the server's RBAC tables, not a hand-maintained copy).
+
+### Privacy
+
+The Privacy view is the resident-audit surface, four cards:
+
+- **Where your data lives** — engine, storage root, crypto vault state: the
+  data map in one glance.
+- **Retention by camera** — per-camera overrides and the system defaults,
+  stating plainly when a camera just inherits the default.
+- **Mask inventory** — every privacy mask across every camera with its
+  reason, plus a count of cameras with **no masks yet** (a nudge, not a
+  scolding).
+- **Data-subject erasure** — search a person by label, then typed-confirm
+  erasure (same cascade as the Identities screen).
 
 ## What is encrypted, and where
 

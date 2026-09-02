@@ -23,6 +23,10 @@
   --text-secondary: #9aa7b8;  /*  7.3:1                                     */
   --text-tertiary:  #6e7a89;  /*  4.6:1 — smallest legal body text          */
   --text-disabled:  #4d5766;  /*  2.9:1 — decorative only, never text        */
+  /* legacy aliases (Wave-2 components.css references) — keep both spellings
+     working until that section is rewritten */
+  --text-1: var(--text-primary);
+  --text-2: var(--text-secondary);
 
   /* ── brand — split decor vs text-on-accent (fixes C-5, 3.75:1) ─────── */
   --accent:        #2f81f7;   /* borders, chart fills, links (on dark: 5.9:1) */

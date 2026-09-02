@@ -585,3 +585,105 @@ body.wall-mode .live-tile-bar { position: absolute; bottom: 0; left: 0; right: 0
   padding: var(--sp-2) 0; border-bottom: 1px solid var(--border-1);
 }
 .alert-item:last-child { border-bottom: none; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   WAVE 3 — MANAGE (cameras grid/detail, mask + rules editors, wizard,
+   identities, alerts admin, users, privacy dashboard)
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Camera card grid ──────────────────────────────────────────────── */
+.cam-grid {
+  display: grid; gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+.cam-card {
+  background: var(--surface-1); border: 1px solid var(--border-2);
+  border-radius: var(--radius-l); padding: var(--sp-4);
+  display: flex; flex-direction: column; gap: var(--sp-3);
+}
+.cam-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-2); }
+.cam-card-meta { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2) var(--sp-4); margin: 0; }
+.cam-card-meta dt { font-size: var(--text-xs); color: var(--text-tertiary); }
+.cam-card-meta dd { margin: 0 0 var(--sp-2); font-size: var(--text-sm); }
+.cam-card-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: auto; }
+.linklike {
+  background: none; border: none; padding: 0; color: var(--accent-text);
+  cursor: pointer; font: inherit; text-align: left; min-height: 0;
+}
+.linklike:hover { text-decoration: underline; }
+.cam-name { font-size: var(--text-lg); font-weight: 600; }
+
+/* ── Camera detail + tabs ─────────────────────────────────────────── */
+.cam-detail { display: flex; flex-direction: column; gap: var(--sp-4); }
+.cam-detail-body { display: flex; flex-direction: column; gap: var(--sp-4); }
+.tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--border-1); flex-wrap: wrap; }
+.tabs button {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--text-secondary); font: inherit; font-size: var(--text-sm);
+  padding: var(--sp-2) var(--sp-3); cursor: pointer; min-height: var(--control-h-sm);
+}
+.tabs button:hover { color: var(--text-primary); background: var(--surface-2); }
+.tabs button.active { color: var(--text-primary); border-bottom-color: var(--accent); }
+.form-col { display: flex; flex-direction: column; gap: var(--sp-3); max-width: 560px; }
+
+/* ── Mask editor + rules editor shared stage ───────────────────────── */
+.mask-stage { position: relative; border-radius: var(--radius-s); overflow: hidden;
+  background: repeating-conic-gradient(var(--surface-2) 0% 25%, var(--surface-1) 0% 50%)
+    50% / 24px 24px; aspect-ratio: 16 / 9; }
+.mask-snapshot { position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; background: var(--surface-0); }
+.mask-overlay { position: absolute; inset: 0; width: 100%; height: 100%;
+  touch-action: none; }
+.mask-overlay.drawing { cursor: crosshair; }
+.mask-rect { fill: rgba(63, 185, 80, 0.28); stroke: var(--status-ok); stroke-width: 2; }
+.mask-rect.draft { fill: rgba(63, 185, 80, 0.14); stroke-dasharray: 6 4; }
+.mask-editor .card, .rules-editor .card { margin-bottom: var(--sp-4); }
+.mask-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.mask-row { display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-1); border-radius: var(--radius-s); }
+.mask-row .mask-desc { flex: 1; display: flex; flex-direction: column; }
+.mask-swatch { width: 14px; height: 14px; border-radius: 3px;
+  background: rgba(63, 185, 80, 0.4); border: 1px solid var(--status-ok); }
+
+/* ── Rules editor overlays ─────────────────────────────────────────── */
+.rule-line { stroke: var(--accent); stroke-width: 3; }
+.rule-line.draft { stroke-dasharray: 8 5; }
+.rule-zone { fill: rgba(210, 153, 34, 0.22); stroke: var(--status-warn); stroke-width: 2; }
+.rule-zone.draft { fill: rgba(210, 153, 34, 0.12); stroke-dasharray: 6 4; }
+.rule-point { fill: var(--status-warn); }
+
+/* ── Add-camera wizard ────────────────────────────────────────────── */
+.wz-steps { list-style: none; display: flex; gap: var(--sp-4); margin: 0; padding: 0; }
+.wz-steps li { display: flex; align-items: center; gap: var(--sp-2);
+  color: var(--text-tertiary); font-size: var(--text-sm); }
+.wz-steps li.current { color: var(--text-primary); font-weight: 600; }
+.wz-steps li.done { color: var(--status-ok); }
+.wz-idx { display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border-2); align-items: center; justify-content: center;
+  font-size: var(--text-xs); }
+.wz-steps li.current .wz-idx { border-color: var(--accent); background: var(--accent-soft); }
+.wz-steps li.done .wz-idx { border-color: var(--status-ok); }
+.wz-devs { list-style: none; margin: var(--sp-3) 0 0; padding: 0; display: flex;
+  flex-direction: column; gap: var(--sp-2); }
+.wz-devs li { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border-2);
+  border-radius: var(--radius-s); font-size: var(--text-sm); }
+
+/* ── Identities / Users / Alerts admin shared bits ─────────────────── */
+.count-chip { font-variant-numeric: tabular-nums; font-size: var(--text-xs);
+  background: var(--surface-2); border: 1px solid var(--border-1); padding: 1px 8px;
+  border-radius: 999px; }
+.confirm-zone { border: 1px solid var(--status-warn); border-radius: var(--radius-s);
+  padding: var(--sp-3); background: rgba(210, 153, 34, 0.08); margin-top: var(--sp-3);
+  display: flex; flex-direction: column; gap: var(--sp-2); }
+.confirm-zone input { width: 100%; }
+.ref-meta { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  gap: var(--sp-2); }
+.ref-meta li { display: flex; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-2) 0; border-bottom: 1px solid var(--border-1); font-size: var(--text-sm); }
+.ref-meta li:last-child { border-bottom: none; }
+.route-row { display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3); border: 1px solid var(--border-1); border-radius: var(--radius-s); }
+.route-row .grow { flex: 1; }
+.kv-grid { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-2) var(--sp-4); }
+.kv-grid dt { color: var(--text-tertiary); font-size: var(--text-sm); }
+.kv-grid dd { margin: 0; font-size: var(--text-sm); }
