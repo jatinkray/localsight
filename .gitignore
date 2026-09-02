@@ -20,7 +20,15 @@ localvision.egg-info/
 coverage.xml
 htmlcov/
 # UI audit artifacts (regenerable via scripts/ui_audit.py et al.)
-ui_audit/
+# — EXCEPT the visual-regression baselines, which are committed: they are
+#   the reference the CI comparison runs against (deterministic: seeded
+#   data + fixed viewport + reduced motion).
+ui_audit/*
+!ui_audit/baselines/
+!ui_audit/baselines/*.png
+# UI e2e throwaway artifacts (per-session server roots)
+ui_e2e_artifacts_*/
+ui_e2e_*.db
 .pw-browsers/
 # TLS material (self-signed demo certs are generated locally; real certs
 # must never be committed)
