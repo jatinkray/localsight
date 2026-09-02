@@ -132,28 +132,26 @@ async function tryRefresh() {
  */
 export async function api(path, opts = {}) {
   const hadSession = Boolean(accessToken);
-  let response = await fetch(path, {
+  // FormData bodies (file uploads) set their own multipart boundary —
+  // forcing application/json on them corrupts the upload.
+  const isForm = typeof FormData !== "undefined" && opts.body instanceof FormData;
+  const send = () => fetch(path, {
     ...opts,
     headers: {
-      "Content-Type": "application/json",
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...(opts.headers || {}),
       ...authHeaders(),
     },
   });
+
+  let response = await send();
 
   // Never refresh-retry the auth endpoints themselves (login's own 401 means
   // "wrong credentials", refresh's 401 means "session over").
   const isAuthCall = path.startsWith("/api/auth/");
   if (response.status === 401 && !isAuthCall && (await tryRefresh())) {
     emit("auth:restored");
-    response = await fetch(path, {
-      ...opts,
-      headers: {
-        "Content-Type": "application/json",
-        ...(opts.headers || {}),
-        ...authHeaders(),
-      },
-    });
+    response = await send();
   }
 
   if (response.status === 401 && hadSession) {

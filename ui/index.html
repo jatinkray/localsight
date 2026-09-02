@@ -51,6 +51,9 @@
         <button data-view="events">Events</button>
         <button data-view="timeline">Timeline</button>
         <button data-view="people">People</button>
+        <button data-view="alerts">Alerts</button>
+        <button data-view="users">Users</button>
+        <button data-view="privacy">Privacy</button>
         <button data-view="audit">Audit</button>
       </nav>
       <span class="trust-chip" title="Video, faces and credentials are encrypted on this host — nothing leaves it.">
@@ -90,7 +93,10 @@
 
       <section data-panel="cameras" class="panel hidden" aria-label="Cameras">
         <div class="card">
-          <div class="panel-head"><h2>Cameras</h2></div>
+          <div class="panel-head">
+            <h2>Cameras</h2>
+            <button id="add-camera" class="ghost hidden" data-act="add-camera">+ Add camera</button>
+          </div>
           <div id="cameras-list"></div>
         </div>
       </section>
@@ -133,15 +139,35 @@
 
       <section data-panel="people" class="panel hidden" aria-label="People">
         <div class="card">
-          <div class="panel-head"><h2>People / identities</h2></div>
-          <form id="person-form" class="form-row" novalidate>
-            <label for="person-label">Label
-              <input id="person-label" class="mono" placeholder="employee-001" required /></label>
-            <label for="person-name">Display name
-              <input id="person-name" placeholder="Alice Nguyen" /></label>
-            <button type="submit" class="primary">Enroll person</button>
-          </form>
+          <div class="panel-head">
+            <h2>People / identities</h2>
+            <button id="person-add" class="ghost hidden">+ Enroll person</button>
+          </div>
           <div id="people-list"></div>
+        </div>
+      </section>
+
+      <section data-panel="alerts" class="panel hidden" aria-label="Alerts admin">
+        <div class="card">
+          <div class="panel-head">
+            <h2>Alert routes</h2>
+            <button id="route-add" class="ghost hidden">+ New route</button>
+          </div>
+          <div id="alerts-admin-list"></div>
+        </div>
+      </section>
+
+      <section data-panel="users" class="panel hidden" aria-label="Users">
+        <div class="card">
+          <div class="panel-head"><h2>Users</h2></div>
+          <div id="users-list"></div>
+        </div>
+      </section>
+
+      <section data-panel="privacy" class="panel hidden" aria-label="Privacy">
+        <div class="card">
+          <div class="panel-head"><h2>Privacy & data</h2></div>
+          <div id="privacy-list"></div>
         </div>
       </section>
 
