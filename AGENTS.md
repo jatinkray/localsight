@@ -97,7 +97,7 @@ tests/           unit + security + API + integration; tests/ui = Playwright e2e
 
 - **Dev**: SQLite, tests run against an in-memory-ish session-scoped app
   (`conftest.py`); `.venv` at repo root; `pytest tests/ -q` must pass
-  (currently 90 tests). The UI e2e suite is separate: `pytest tests/ui -m ui`
+  (currently 97 tests). The UI e2e suite is separate: `pytest tests/ui -m ui`
   boots a real uvicorn server + seeded throwaway DB and drives it with
   Playwright (needs `playwright`, `pytest-playwright`, chromium, ffmpeg);
   `pytest tests/` never collects it (deselected via the `ui` marker,
