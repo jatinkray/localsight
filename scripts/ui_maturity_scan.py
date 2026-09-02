@@ -83,6 +83,8 @@ STATES: list[dict] = [
         wait="[data-act='user-create']"),
     _st("privacy", view="privacy"),
     _st("audit", view="audit"),
+    # M2: the account story — self-service security
+    _st("account", view="account", wait="[data-view-root='account']", settle=800),
 ]
 
 # metrics harvested from the live DOM (pure reads)
@@ -133,6 +135,11 @@ METRIC_JS = """() => {
     filter_inputs: [...document.querySelectorAll('select,input[type=search],input.filter')].length,
     export_buttons: [...document.querySelectorAll('[data-act*=export],[data-export],#ev-export,#au-export')].length,
     timezone_labels: [...document.querySelectorAll('*')].filter(el => /UTC|GMT|[+-]\\d{2}:\\d{2}/.test(el.textContent)).length,
+    // M2/E-5/E-6/E-13: self-service security affordances
+    mfa_enroll: !!document.querySelector("[data-act='mfa-setup'],[data-act='mfa-verify']"),
+    password_form: !!document.querySelector("[data-form='pw-change']"),
+    session_rows: document.querySelectorAll("[data-session]").length,
+    tz_picker: !!document.querySelector("[data-field='tz']"),
   };
   // forms: labeled vs orphan controls
   const inputs = [...document.querySelectorAll('input:not([type=hidden]),select,textarea')];

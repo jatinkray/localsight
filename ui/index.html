@@ -56,6 +56,7 @@
         <button data-view="users">Users</button>
         <button data-view="privacy">Privacy</button>
         <button data-view="audit">Audit</button>
+        <button data-view="account">Account</button>
       </nav>
       <span class="trust-chip" title="Video, faces and credentials are encrypted on this host — nothing leaves it.">
         <span aria-hidden="true">🔒</span> Local · Encrypted
@@ -178,6 +179,12 @@
         </div>
       </section>
 
+      <section data-panel="account" class="panel hidden" aria-label="Account">
+        <div class="card">
+          <div class="panel-head"><h2>Account</h2></div>
+          <div id="account-list" class="an-grid"></div>
+        </div>
+      </section>
       <section data-panel="audit" class="panel hidden" aria-label="Audit log">
         <div class="card">
           <div class="panel-head">

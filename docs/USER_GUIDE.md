@@ -276,6 +276,22 @@ clocks that could mean two wall-times to two people.
 The **Audit** view additionally filters by user, action, result and a
 date window, and paginates — compliance review no longer means scrolling.
 
+## Your account (M2)
+
+The **Account** view (last nav item) is self-service security:
+
+- **Password** — rotate your own password (12+ characters). Other devices
+  are signed out automatically; every rotation is audited.
+- **Two-factor authentication** — enroll with any TOTP authenticator
+  (Google Authenticator, 1Password, Aegis). After enrollment your login
+  asks for a 6-digit code. To switch devices, ask an administrator for an
+  MFA reset, then re-enroll.
+- **Active sessions** — every device where you're signed in; revoke any
+  of them individually. Admins can revoke all of a user's sessions from
+  the Users view ("Sign out all").
+- **Timezone** — choose how times are displayed to you (stored in UTC,
+  rendered in your choice; per-browser, never uploaded).
+
 ## Keyboard shortcuts
 
 The console is fully operable without a mouse:

@@ -17,6 +17,7 @@ import { loadTimeline } from "./views/timeline.js";
 import { loadLive, wireLiveView } from "./views/live.js";
 import { loadPeople } from "./views/people.js";
 import { loadAudit, wireAuditView } from "./views/audit.js";
+import { loadAccount } from "./views/account.js";
 import { loadAlertsAdmin } from "./views/alerts_admin.js";
 import { loadUsers } from "./views/users.js";
 import { loadPrivacy } from "./views/privacy.js";
@@ -104,6 +105,11 @@ onView("analytics", (params) => {
   showPanels("analytics");
   loadAnalytics($("#analytics-list"), params);
 });
+onView("account", () => {
+  showPanels("account");
+  loadAccount($("#account-list"));
+});
+
 onView("audit", () => {
   showPanels("audit");
   loadAudit($("#audit-list"));
