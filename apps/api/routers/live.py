@@ -27,6 +27,7 @@ from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from apps.api.domain_live_cfg import LIVE_DIR, LIVE_IDLE_TIMEOUT_SEC, LIVE_MAX_DURATION_SEC
 from packages.domain.models import Camera
+from packages.domain.timeutil import iso
 from packages.observability.logging import logging as log
 
 router = APIRouter(prefix="/api", tags=["live"])
@@ -216,11 +217,11 @@ def issue_ticket(body: TicketRequest, request: Request, db: Session = Depends(ge
     if not cam:
         raise HTTPException(status_code=404, detail="camera not found")
     exp = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=max(30, min(body.ttl_sec, 3600)))
-    token = rt.crypto.encrypt_json({"camera_id": body.camera_id, "exp": exp.isoformat()})
+    token = rt.crypto.encrypt_json({"camera_id": body.camera_id, "exp": iso(exp)})
     from apps.api.audit import write_audit
     write_audit(db, user=request.state.user, action="live.ticket.issue", resource=body.camera_id,
                 request_id=getattr(request.state, "request_id", "-"))
-    return {"camera_id": body.camera_id, "ticket": token, "expires_at": exp.isoformat()}
+    return {"camera_id": body.camera_id, "ticket": token, "expires_at": iso(exp)}
 
 
 @router.get("/live/{camera_id}/play", dependencies=[Depends(require_permission("live:view"))])

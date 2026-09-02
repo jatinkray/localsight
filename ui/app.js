@@ -16,7 +16,7 @@ import { loadEvents, wireEventsView } from "./views/events.js";
 import { loadTimeline } from "./views/timeline.js";
 import { loadLive, wireLiveView } from "./views/live.js";
 import { loadPeople } from "./views/people.js";
-import { loadAudit } from "./views/audit.js";
+import { loadAudit, wireAuditView } from "./views/audit.js";
 import { loadAlertsAdmin } from "./views/alerts_admin.js";
 import { loadUsers } from "./views/users.js";
 import { loadPrivacy } from "./views/privacy.js";
@@ -191,7 +191,7 @@ async function boot() {
       camera: $("#tl-camera").value.trim() || undefined,
     });
   });
-  $("#audit-load").addEventListener("click", () => navigate("audit"));
+  wireAuditView($("#audit-list"));
 
   onAuthEvent((ev) => {
     if (ev.type === "auth:expired") leaveApp({ notice: "Session expired — please sign in again." });

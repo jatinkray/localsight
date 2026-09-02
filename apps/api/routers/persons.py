@@ -16,6 +16,7 @@ from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_db, get_runtime, require_permission
 from packages.domain.models import Person, PersonEmbedding
+from packages.domain.timeutil import iso
 
 router = APIRouter(prefix="/api/persons", tags=["persons"])
 
@@ -31,7 +32,7 @@ def list_persons(db: Session = Depends(get_db)):
             .where(PersonEmbedding.person_id == p.id)
         ).scalar() or 0
         out.append({"id": p.id, "label": p.label, "display_name": p.display_name,
-                    "status": p.status, "created_at": p.created_at.isoformat(),
+                    "status": p.status, "created_at": iso(p.created_at),
                     "faces_enrolled": enrolled})
     return out
 
@@ -87,7 +88,7 @@ def list_references(person_id: str, db: Session = Depends(get_db)):
         "references": [
             {"id": r.id, "model_version": r.model_version, "dimension": r.dimension,
              "quality_score": r.quality_score,
-             "created_at": r.created_at.isoformat()}
+             "created_at": iso(r.created_at)}
             for r in rows
         ],
     }

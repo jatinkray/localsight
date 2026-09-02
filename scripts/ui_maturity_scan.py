@@ -123,13 +123,15 @@ METRIC_JS = """() => {
     row_count: t.querySelectorAll('tbody tr').length,
     caption: t.querySelector('caption') ? true : false,
   }));
-  // pagination / bulk / filter affordances
+  // pagination / bulk / filter affordances (M-wave regression probes)
   out.affordances = {
     pagination_text: txt('#ev-pages, [data-role=pagination]'),
     bulk_checkbox: !!document.querySelector("input[type=checkbox][data-bulk], th input[type=checkbox]"),
     sort_indicators: [...document.querySelectorAll('[data-sort], .sort-arrow, th[onclick]')].length,
+    // M1/E-1: real sortable headers carry aria-sort
+    sortable_th: [...document.querySelectorAll('th[aria-sort]')].length,
     filter_inputs: [...document.querySelectorAll('select,input[type=search],input.filter')].length,
-    export_buttons: [...document.querySelectorAll('[data-act*=export],[data-export]')].length,
+    export_buttons: [...document.querySelectorAll('[data-act*=export],[data-export],#ev-export,#au-export')].length,
     timezone_labels: [...document.querySelectorAll('*')].filter(el => /UTC|GMT|[+-]\\d{2}:\\d{2}/.test(el.textContent)).length,
   };
   // forms: labeled vs orphan controls

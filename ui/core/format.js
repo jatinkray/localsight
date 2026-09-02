@@ -1,20 +1,65 @@
 // Formatting helpers — display strings only; never trust for HTML (see dom.js).
+//
+// TIME (M1/E-4): every wall-clock render goes through one contract — the
+// API sends UTC (Z or +00:00 suffix, enforced by packages.domain.timeutil.iso)
+// and these helpers render it in the OPERATOR's chosen timezone with the tz
+// name visible. No bare clocks, no ambiguous "5h ago" without an anchor.
 
-/** "14:02:11" — always local time, tabular-friendly. */
+const TZ_KEY = "lv-timezone"; // per-browser preference, default UTC (M2 adds the picker)
+
+/** The active display timezone (IANA name). */
+export function displayTz() {
+  try { return localStorage.getItem(TZ_KEY) || "UTC"; } catch { return "UTC"; }
+}
+
+export function setDisplayTz(tz) {
+  try { localStorage.setItem(TZ_KEY, tz); } catch { /* memory-only */ }
+}
+
+export function tzSuffix(d = new Date()) {
+  const tz = displayTz();
+  if (tz === "UTC") return "UTC";
+  try {
+    return new Intl.DateTimeFormat("en", { timeZone: tz, timeZoneName: "short" })
+      .formatToParts(d).find((p) => p.type === "timeZoneName")?.value || tz;
+  } catch { return tz; }
+}
+
+function _parts(d, opts) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: displayTz(), hour12: false, ...opts,
+  }).format(d);
+}
+
+/** "15:30:12 UTC" — clock + tz, never a bare clock. */
 export function fmtTime(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString(undefined, { hour12: false });
+  return `${_parts(d, { hour: "2-digit", minute: "2-digit", second: "2-digit" })} ${tzSuffix(d)}`;
 }
 
-/** "2026-09-01 14:02" */
+/** "2 Sep, 15:30" — for tight slots where seconds don't matter. */
+export function fmtTimeShort(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return _parts(d, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/** "2 Sep 2026, 15:30:12 UTC" — full unambiguous wall-clock (E-4 fix). */
 export function fmtDateTime(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return `${d.toLocaleDateString()} ${d.toLocaleTimeString(undefined, { hour12: false })}`;
+  return `${_parts(d, { day: "numeric", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit" })} ${tzSuffix(d)}`;
 }
 
-/** "3m ago", "yesterday", "2d ago" — relative to now. */
+/** ISO 8601 with explicit offset — for title tooltips and copy-exact needs. */
+export function fmtIso(d = new Date()) {
+  return d.toISOString();
+}
+
+/** "3m ago", "yesterday", "2d ago" — relative, but always next to an absolute
+ *  render somewhere (drawer/tooltip). Kept for glanceable recency. */
 export function fmtRelative(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
@@ -24,7 +69,7 @@ export function fmtRelative(iso) {
   if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
   if (sec < 172800) return "yesterday";
   if (sec < 2592000) return `${Math.floor(sec / 86400)}d ago`;
-  return d.toLocaleDateString();
+  return fmtTimeShort(iso);
 }
 
 /** Short camera/identity id for dense tables: 9501d7a0 (not full hex). */

@@ -5,14 +5,18 @@
 // (router.js owns view state now — the old JS-only state is gone).
 
 import { h, render } from "../core/dom.js";
-import { api } from "../core/api.js";
+import { api, can } from "../core/api.js";
+import { toast } from "../core/toast.js";
 import { skeletonRows, emptyState, errorState } from "../core/states.js";
-import { fmtTime, fmtRelative, fmtDuration, shortId, label, tone } from "../core/format.js";
+import { fmtTime, fmtDateTime, fmtIso, fmtRelative, fmtDuration, shortId, label, tone }
+  from "../core/format.js";
 import { navigate } from "../core/router.js";
 
 const PAGE = 25;
 let cameraNames = null;
 let offset = 0;
+let sortKey = "timestamp";     // M1/E-1: server-side sort state
+let sortDir = "desc";
 let lastItems = [];
 let cursor = -1; // keyboard selection index
 let listWrap = null;
@@ -81,6 +85,10 @@ function moveCursor(delta) {
 
 export async function loadEvents(wrapEl, { resetOffset = false, params = {} } = {}) {
   listWrap = wrapEl;
+  // Export gate runs on every load — can() is only live after /api/auth/me,
+  // so a boot-time toggle would hide the button for entitled roles.
+  const eb = document.getElementById("ev-export");
+  if (eb) eb.classList.toggle("hidden", !can("events:export"));
   applyFiltersToInputs(params);
   if (resetOffset) offset = 0;
   cursor = -1;
@@ -89,20 +97,39 @@ export async function loadEvents(wrapEl, { resetOffset = false, params = {} } = 
   try {
     const [data, nameMap] = await Promise.all([
       api(`/api/events?${new URLSearchParams({
-        limit: PAGE, offset, ...(filters.camera ? { camera_id: filters.camera } : {}),
+        limit: PAGE, offset, sort: sortKey, direction: sortDir,
+        ...(filters.camera ? { camera_id: filters.camera } : {}),
         ...(filters.status ? { identity_status: filters.status } : {}),
       })}`),
       names(),
     ]);
     lastItems = data.items || [];
     const rows = lastItems.map((e, i) => eventRow(e, nameMap, i));
+
+    // M1/E-1: sortable headers. aria-sort announces state; the arrow is
+    // CSS (::after on .sorted-asc/.sorted-desc). Clicking toggles direction.
+    const th = (key, text) => {
+      const active = sortKey === key;
+      return h("th", {
+        "aria-sort": active ? (sortDir === "asc" ? "ascending" : "descending") : "none",
+        class: active ? (sortDir === "asc" ? "sorted-asc" : "sorted-desc") : "",
+        scope: "col",
+        ...(key ? { onClick: () => {
+          if (sortKey === key) sortDir = sortDir === "asc" ? "desc" : "asc";
+          else { sortKey = key; sortDir = key === "timestamp" ? "desc" : "asc"; }
+          offset = 0;
+          loadEvents(wrapEl);
+        } } : {}),
+      }, text);
+    };
+
     render(wrapEl, rows.length
       ? h("div", { class: "table-scroll" },
           h("table", { id: "events-table" },
             h("thead", {}, h("tr", {},
-              h("th", {}, "Camera"), h("th", {}, "Identity"), h("th", {}, "Type"),
-              h("th", {}, "Start"), h("th", {}, "Duration"), h("th", {}, "Conf"),
-              h("th", {}, "Media"),
+              th("camera", "Camera"), th("identity", "Identity"), th("type", "Type"),
+              th("timestamp", "Start"), th("duration", "Duration"), th("confidence", "Conf"),
+              th(null, "Media"),
             )),
             h("tbody", {}, rows),
           ),
@@ -125,6 +152,43 @@ export function wireEventsView(wrapEl) {
   document.getElementById("ev-search").addEventListener("click", () => {
     navigate("events", currentFilters()); // URL carries the investigation
   });
+  const exportBtn = document.getElementById("ev-export");
+  if (exportBtn) exportBtn.classList.toggle("hidden", !can("events:export"));
+  if (exportBtn && !exportBtn.dataset.wired) {
+    exportBtn.dataset.wired = "1";
+    exportBtn.addEventListener("click", async () => {
+      // M1/E-2: export the CURRENT result set — same filters + sort the table
+      // shows, honored server-side; the export itself is audited. Goes through
+      // the shared fetch layer so the auth header rides along, then a blob
+      // download hands the file to the operator.
+      exportBtn.disabled = true;
+      const old = exportBtn.textContent;
+      exportBtn.textContent = "Exporting…";
+      try {
+        const f = currentFilters();
+        const qs = new URLSearchParams({
+          ...(f.camera ? { camera_id: f.camera } : {}),
+          ...(f.status ? { identity_status: f.status } : {}),
+          sort: sortKey, direction: sortDir,
+        });
+        const csv = await api(`/api/events/export.csv?${qs}`);
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `events-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast(`Exported ${csv.split("\n").length - 1} rows — the download is yours`, { tone: "ok" });
+      } catch (err) {
+        toast(err.status === 403 ? "Your role can't export events" : "Export failed — try again",
+          { tone: "error" });
+      } finally {
+        exportBtn.disabled = false;
+        exportBtn.textContent = old;
+      }
+    });
+  }
   document.getElementById("ev-prev").addEventListener("click", () => {
     offset = Math.max(0, offset - PAGE);
     loadEvents(wrapEl);

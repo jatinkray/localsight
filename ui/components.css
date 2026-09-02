@@ -185,6 +185,15 @@ th {
   position: sticky;
   top: 0;
 }
+
+/* M1/E-1: sortable headers — arrow in ::after (CSP-safe, no inline styles) */
+th[aria-sort] { cursor: pointer; user-select: none; }
+th[aria-sort="ascending"]::after,
+th[aria-sort="descending"]::after {
+  content: "↑"; opacity: 0.9; margin-inline-start: var(--sp-1); color: var(--accent);
+}
+th[aria-sort="descending"]::after { content: "↓"; }
+th[aria-sort="none"]:hover { color: var(--text-primary); }
 tbody tr { transition: background var(--motion-fast); }
 tbody tr:hover { background: var(--surface-3); }
 tbody tr:last-child td { border-bottom: none; }

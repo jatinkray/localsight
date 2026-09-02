@@ -256,6 +256,26 @@ same API without a UI change.
 `GET /api/analytics/search?q=…` is the API; it accepts camera and time
 filters too.
 
+## Sorting, exporting and unambiguous time (M1)
+
+Every data table (Events, Audit) is **sortable**: click a column header to
+sort by it, click again to reverse; the arrow shows the direction and the
+sort runs server-side over the whole result set — not just the visible
+page.
+
+**Export CSV** (Events and Audit toolbars) downloads exactly what the
+current filters and sort produce — every export lands in the audit log,
+and formula-style cells (leading `=`, `+`, `-`, `@`) are neutralized so
+opening the file in a spreadsheet is safe.
+
+**Times are unambiguous everywhere.** The server sends UTC with an
+explicit offset, and the console renders `2 Sept 2026, 15:30:12 UTC`
+(dense tables show the short form with a full ISO tooltip). No more bare
+clocks that could mean two wall-times to two people.
+
+The **Audit** view additionally filters by user, action, result and a
+date window, and paginates — compliance review no longer means scrolling.
+
 ## Keyboard shortcuts
 
 The console is fully operable without a mouse:

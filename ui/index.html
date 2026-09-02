@@ -115,6 +115,7 @@
               <option value="uncertain">Uncertain</option>
             </select>
             <button id="ev-search" class="primary">Search</button>
+            <button id="ev-export" class="ghost" title="Export the current result set as CSV — audited">Export CSV</button>
           </div>
           <div id="events-wrap"></div>
           <div class="pager">
@@ -181,9 +182,27 @@
         <div class="card">
           <div class="panel-head">
             <h2>Audit log</h2>
-            <button id="audit-load" class="ghost">Refresh</button>
+            <button id="au-export" class="ghost" title="Export the filtered trail as CSV — audited">Export CSV</button>
+          </div>
+          <div class="toolbar" id="audit-filters">
+            <input id="au-user" class="mono" placeholder="User (contains)" aria-label="Filter by user" />
+            <select id="au-action" aria-label="Filter by action">
+              <option value="">Any action</option>
+            </select>
+            <select id="au-result" aria-label="Filter by result">
+              <option value="">Any result</option>
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
+            </select>
+            <input id="au-start" type="date" aria-label="From date" title="From (UTC)" />
+            <input id="au-end" type="date" aria-label="To date" title="To (UTC)" />
           </div>
           <div id="audit-list"></div>
+          <div class="pager">
+            <button id="au-prev" class="ghost" aria-label="Previous page">← Prev</button>
+            <span id="au-page" class="page-indicator" aria-live="polite">1</span>
+            <button id="au-next" class="ghost" aria-label="Next page">Next →</button>
+          </div>
         </div>
       </section>
     </main>

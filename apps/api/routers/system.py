@@ -31,7 +31,7 @@ except Exception:  # pragma: no cover
 
 @router.get("/health/live")
 def live():
-    return {"status": "alive", "ts": dt.datetime.now(dt.UTC).isoformat()}
+    return {"status": "alive", "ts": dt.datetime.now(dt.UTC)}
 
 
 @router.get("/health/ready")
@@ -51,7 +51,7 @@ def ready(request: Request, rt: Runtime = Depends(get_runtime)):
         components["storage"] = {"status": "down", "detail": str(exc)[:200]}
     overall = "ready" if all(c["status"] == "ok" for c in components.values()) else "degraded"
     return {"status": overall, "components": components,
-            "ts": dt.datetime.now(dt.UTC).isoformat()}
+            "ts": dt.datetime.now(dt.UTC)}
 
 
 @router.get("/api/system/health")
@@ -69,7 +69,7 @@ def system_health(request: Request, _: User = Depends(get_current_user),
             "database": {"status": "ok" if db_ok else "down"},
             "ai_model": {"name": rt.settings.ai_detector, "version": rt.embedder.model_version},
         },
-        "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+        "generated_at": dt.datetime.now(dt.UTC),
     }
 
 

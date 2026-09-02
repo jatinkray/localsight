@@ -23,6 +23,7 @@ from packages.domain.analytics import (
     people_counting,
 )
 from packages.domain.models import Camera, Event, Person
+from packages.domain.timeutil import iso
 
 router = APIRouter(prefix="/api", tags=["analytics"])
 
@@ -61,7 +62,7 @@ def dashboard_summary(db: Session = Depends(get_db)):
     identities = db.execute(select(func.count(Person.id))).scalar() or 0
 
     return {
-        "generated_at": now.isoformat(),
+        "generated_at": iso(now),
         "cameras": {"total": len(cameras), **cam_status, "per_camera": per_camera},
         "events_today": {"total": _count(), "unknown": _count("unknown")},
         "identities": identities,
@@ -86,7 +87,7 @@ def people_count(camera_id: str, start: str, end: str, db: Session = Depends(get
 @router.get("/analytics/occupancy", dependencies=[Depends(require_permission("analytics:view"))])
 def occupancy(camera_id: str, start: str, end: str, bucket_min: int = 60, db: Session = Depends(get_db)):
     return {"camera_id": camera_id,
-            "buckets": [{"ts": t.isoformat(), "count": c}
+            "buckets": [{"ts": iso(t), "count": c}
                         for t, c in occupancy_trend(db, camera_id, _parse(start), _parse(end), bucket_min)]}
 
 
@@ -133,7 +134,7 @@ def semantic_search(q: str, camera_id: str | None = None, start: str = "", end: 
     rows = {ev.id: ev for ev in db.execute(select(Event).where(Event.id.in_(ids))).scalars().all()}
     return {"query": q, "results": [
         {"id": ev.id, "event_type": ev.event_type, "camera_id": ev.camera_id,
-         "ts": ev.timestamp_start.isoformat() if ev.timestamp_start else None,
+         "ts": iso(ev.timestamp_start) if ev.timestamp_start else None,
          "score": round(score, 4)}
         for ev_id, score in ranked if (ev := rows.get(ev_id)) is not None
     ]}

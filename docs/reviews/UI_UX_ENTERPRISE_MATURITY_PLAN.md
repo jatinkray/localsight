@@ -218,12 +218,15 @@ CSV export (E-2 pattern). Compliance reviewers live here.
 
 ## 4. Roadmap (3 waves, ~6 weeks total)
 
-### Wave M1 — "The analyst's Tuesday" (E-1, E-2, E-4, E-14) ~2wk
+### Wave M1 — "The analyst's Tuesday" (E-1, E-2, E-4, E-14) ~2wk  ✅ SHIPPED
 Sortable, exportable, time-stamped, filterable data surfaces.
-**Exit:** an analyst can open Events, sort by confidence, filter to a
-camera+status, export the CSV, and every timestamp is unambiguous;
-Audit filters/paginates/exports. All behind existing CI gates + new
-e2e tests (sort interaction, CSV download, tz rendering).
+**Exit (met, verified by the maturity scan):** Events sorts by any column
+(server-side whitelist; `aria-sort` on 7 headers) and exports the filtered
+set as CSV (96-row demo export verified, audited, CSV-injection-safe);
+all timestamps render UTC-suffixed end to end (74 tz labels on Events,
+191 on Audit; zero bare clocks); Audit filters by user/action/result/date,
+paginates, and exports (57-row export verified). Existing CI gates +
+probes stay green (90 unit, 43 e2e, 5 wave probes).
 
 ### Wave M2 — "The account story" (E-5, E-6, E-13 + Account view) ~2wk
 MFA enroll/disable, password change, session list/revoke, profile.
