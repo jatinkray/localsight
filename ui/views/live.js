@@ -83,7 +83,12 @@ async function startStream(cam, videoEl, stateEl) {
     videoEl._hls = hls;
   } catch (err) {
     if (err instanceof ApiError && err.status === 503) {
+      // transcode couldn't start (no ffmpeg / camera unreachable)
       stateEl.textContent = "Stream unavailable";
+      videoEl.closest(".live-tile")?.classList.add("offline");
+    } else if (err instanceof ApiError && err.status === 400) {
+      // egress validation rejected the camera's stream URL (SSRF guard)
+      stateEl.textContent = "Stream URL blocked";
       videoEl.closest(".live-tile")?.classList.add("offline");
     } else if (err instanceof ApiError && err.status === 404) {
       stateEl.textContent = "Camera not found";

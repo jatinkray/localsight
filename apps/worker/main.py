@@ -211,15 +211,20 @@ def _sweep_retention(rt) -> None:
             s.commit()
 
         # ── events (bulk, chunked) ─────────────────────────────────────────
+        # SQLAlchemy 2.0 rejects Query.delete() after .limit(); select the
+        # PK chunk first, then delete by primary key (same chunking/locking
+        # intent, works on SQLite and PostgreSQL).
         ev_cut = _ts(settings.retention_events_days)
         while True:
-            deleted = (
-                s.query(Event)
-                .filter(Event.timestamp_end < ev_cut)
-                .limit(_SWEEP_CHUNK)
-                .with_for_update()
-                .delete(synchronize_session=False)
-            )
+            ev_ids = [r[0] for r in s.query(Event.id)
+                      .filter(Event.timestamp_end < ev_cut)
+                      .limit(_SWEEP_CHUNK).all()]
+            if not ev_ids:
+                break
+            deleted = (s.query(Event)
+                       .filter(Event.id.in_(ev_ids))
+                       .with_for_update()
+                       .delete(synchronize_session=False))
             s.commit()
             if not deleted:
                 break
@@ -246,13 +251,15 @@ def _sweep_retention(rt) -> None:
         # ── enrollment embeddings (biometric data lifecycle) ───────────────
         emb_cut = _ts(settings.retention_embeddings_days)
         while True:
-            deleted = (
-                s.query(PersonEmbedding)
-                .filter(PersonEmbedding.created_at < emb_cut)
-                .limit(_SWEEP_CHUNK)
-                .with_for_update()
-                .delete(synchronize_session=False)
-            )
+            emb_ids = [r[0] for r in s.query(PersonEmbedding.id)
+                       .filter(PersonEmbedding.created_at < emb_cut)
+                       .limit(_SWEEP_CHUNK).all()]
+            if not emb_ids:
+                break
+            deleted = (s.query(PersonEmbedding)
+                       .filter(PersonEmbedding.id.in_(emb_ids))
+                       .with_for_update()
+                       .delete(synchronize_session=False))
             s.commit()
             if not deleted:
                 break
@@ -260,26 +267,30 @@ def _sweep_retention(rt) -> None:
         # ── audit trail (bounded per RETENTION_AUDIT_DAYS) ────────────────
         audit_cut = _ts(settings.retention_audit_days)
         while True:
-            deleted = (
-                s.query(AuditLog)
-                .filter(AuditLog.ts < audit_cut)
-                .limit(_SWEEP_CHUNK)
-                .with_for_update()
-                .delete(synchronize_session=False)
-            )
+            aud_ids = [r[0] for r in s.query(AuditLog.id)
+                       .filter(AuditLog.ts < audit_cut)
+                       .limit(_SWEEP_CHUNK).all()]
+            if not aud_ids:
+                break
+            deleted = (s.query(AuditLog)
+                       .filter(AuditLog.id.in_(aud_ids))
+                       .with_for_update()
+                       .delete(synchronize_session=False))
             s.commit()
             if not deleted:
                 break
 
         # ── expired refresh tokens ─────────────────────────────────────────
         while True:
-            deleted = (
-                s.query(RefreshToken)
-                .filter(RefreshToken.expires_at < now)
-                .limit(_SWEEP_CHUNK)
-                .with_for_update()
-                .delete(synchronize_session=False)
-            )
+            rt_ids = [r[0] for r in s.query(RefreshToken.id)
+                      .filter(RefreshToken.expires_at < now)
+                      .limit(_SWEEP_CHUNK).all()]
+            if not rt_ids:
+                break
+            deleted = (s.query(RefreshToken)
+                       .filter(RefreshToken.id.in_(rt_ids))
+                       .with_for_update()
+                       .delete(synchronize_session=False))
             s.commit()
             if not deleted:
                 break

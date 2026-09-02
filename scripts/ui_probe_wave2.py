@@ -18,11 +18,15 @@ and the rebuilt overview with auto-refresh:
 import json
 import os
 import secrets
+import ssl
 import sys
 import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+if os.environ.get("LV_INSECURE_TLS"):
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8781")
 ADMIN_EMAIL = "admin@localvision.local"
@@ -30,12 +34,12 @@ OUT = Path("ui_audit/wave2")
 
 
 def admin_login() -> str:
-    env = Path(".env").read_text()
-    pw = ""
-    for line in env.splitlines():
-        if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
-            pw = line.split("=", 1)[1].strip().strip('"')
-            break
+    pw = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not pw:
+        for line in Path(".env").read_text().splitlines():
+            if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
+                pw = line.split("=", 1)[1].strip().strip('"')
+                break
     body = json.dumps({"email": ADMIN_EMAIL, "password": pw}).encode()
     r = urllib.request.Request(f"{BASE}/api/auth/login", data=body,
                                headers={"Content-Type": "application/json"})
@@ -64,15 +68,18 @@ def main() -> int:
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
-        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+        ctx = browser.new_context(
+            viewport={"width": 1440, "height": 900},
+            ignore_https_errors=bool(os.environ.get("LV_INSECURE_TLS")))
         page = ctx.new_page()
         page.on("pageerror", lambda e: console_errors.append(str(e)[:200]))
         # NOTE: "Failed to load resource" console lines carry no URL — the
         # authoritative record is the RESPONSE stream. Documented live
         # resource states (no ffmpeg in dev): 503 on /api/live/* (no
-        # transcoder / unreachable camera), 400 on /api/live/* (SSRF guard),
-        # 404 on /live-media/* (hls.js probing the manifest of a transcode
-        # that never started — the tile already shows the honest state).
+        # transcoder / unreachable camera), 400 on /api/live/* (SSRF guard
+        # — surfaced on tiles as 'Stream URL blocked'), 404 on /live-media/*
+        # (hls.js probing the manifest of a transcode that never started —
+        # the tile already shows the honest state).
         # _on_resp drops those; console resource lines are skipped entirely
         # (pageerror above still catches genuine uncaught JS).
         def _documented(status: int, url: str) -> bool:
@@ -85,7 +92,7 @@ def main() -> int:
         def _on_resp(r):
             if r.status >= 400 and not _documented(r.status, r.url):
                 resource_errors.append(
-                    (r.status, r.url.split("8779")[-1][:60]))
+                    (r.status, r.url.replace(BASE, "")[:60]))
         page.on("response", _on_resp)
 
         page.goto(BASE)

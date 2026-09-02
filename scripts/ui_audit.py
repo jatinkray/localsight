@@ -216,11 +216,12 @@ if __name__ == "__main__":
     ap.add_argument("--out", default="ui_audit")
     ap.add_argument("--mobile", action="store_true")
     args = ap.parse_args()
-    env_pw = ""
-    for line in Path(".env").read_text().splitlines():
-        if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
-            env_pw = line.split("=", 1)[1].strip().strip('"')
-            break
+    env_pw = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not env_pw:
+        for line in Path(".env").read_text().splitlines():
+            if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
+                env_pw = line.split("=", 1)[1].strip().strip('"')
+                break
     if args.email and args.password:
         email, password = args.email, args.password
     else:

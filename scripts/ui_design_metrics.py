@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+if os.environ.get("LV_INSECURE_TLS"):
+    ssl._create_default_https_context = ssl._create_unverified_context
 
 BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8779")
 OUT = Path("ui_audit/metrics")
@@ -68,12 +72,12 @@ JS_TARGETS = """
 
 
 def _admin_token() -> str:
-    env = Path(".env").read_text()
-    pw = ""
-    for line in env.splitlines():
-        if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
-            pw = line.split("=", 1)[1].strip().strip('"')
-            break
+    pw = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not pw:
+        for line in Path(".env").read_text().splitlines():
+            if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
+                pw = line.split("=", 1)[1].strip().strip('"')
+                break
     body = json.dumps({"email": "admin@localvision.local", "password": pw}).encode()
     r = urllib.request.Request(f"{BASE}/api/auth/login", data=body,
                                headers={"Content-Type": "application/json"})
@@ -100,7 +104,9 @@ def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch()
 
-        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+        ctx = browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            ignore_https_errors=bool(os.environ.get("LV_INSECURE_TLS")))
         page = ctx.new_page()
         page.goto(BASE, wait_until="domcontentloaded")
         page.evaluate("() => localStorage.clear()")
@@ -164,6 +170,7 @@ def main() -> None:
 
         ctx = browser.new_context(
             viewport={"width": 390, "height": 844},
+            ignore_https_errors=bool(os.environ.get("LV_INSECURE_TLS")),
             is_mobile=True, has_touch=True,
             user_agent=("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
                         "AppleWebKit/605.1.15 (KHTML, like Gecko) "
