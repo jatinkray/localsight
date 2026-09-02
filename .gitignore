@@ -22,3 +22,10 @@ htmlcov/
 # UI audit artifacts (regenerable via scripts/ui_audit.py et al.)
 ui_audit/
 .pw-browsers/
+# TLS material (self-signed demo certs are generated locally; real certs
+# must never be committed)
+infrastructure/nginx/certs/
+*.key
+*.crt
+infrastructure/compose/demo.env
+.buildx/
