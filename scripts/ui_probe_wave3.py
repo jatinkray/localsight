@@ -295,7 +295,8 @@ def main() -> int:
         page.click("#nav button[data-view='privacy']")
         page.wait_for_selector("[data-view-root='privacy']")
         page.wait_for_timeout(500)
-        results["privacy_cards"] = page.locator("#privacy-list .card").count() == 4
+        # Wave 5 added a 5th card: the opt-in UI-marks toggle (telemetry).
+        results["privacy_cards"] = page.locator("#privacy-list .card").count() == 5
         api_masks = sum(len(c.get("privacy_masks") or []) for c in api("/api/cameras", boot))
         results["mask_inventory_total"] = (
             page.locator("[data-mask-total]").get_attribute("data-mask-total") == str(api_masks))

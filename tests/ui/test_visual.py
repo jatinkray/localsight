@@ -1,0 +1,209 @@
+"""Visual regression on 12 key states (Wave 5, plan §III.11).
+
+Each state screenshots into ui_audit/baselines/ on the first run (or with
+UPDATE_BASELINES=1); later runs re-shoot and compare with a per-channel
+mean-absolute-difference budget. Screenshots are deterministic:
+
+- fixed viewport, no animations (reduced-motion is forced),
+- the same seeded dataset every run (conftest's throwaway DB),
+- timestamps are the one nondeterminism — the budget tolerates them.
+
+A diff over budget prints the numbers and fails; a reviewer regenerates
+baselines ONLY for intended design changes (UPDATE_BASELINES=1), and the
+commit diff then shows exactly which pixels the redesign moved.
+"""
+import os
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.ui
+
+BASELINES = Path("ui_audit/baselines")
+UPDATE = os.environ.get("UPDATE_BASELINES") == "1"
+
+# Per-state tolerance (mean abs diff, 0-255): generous for timestamp-rich
+# states, tight for static ones.
+STATES = {
+    "login":            {"tol": 1.5},
+    "login-error":      {"tol": 1.5},
+    "overview":         {"tol": 3.0},
+    "live-grid":        {"tol": 6.0},   # offline tiles animate their status
+    "event-drawer":     {"tol": 3.0},
+    "timeline":         {"tol": 3.0},
+    "cameras-grid":     {"tol": 3.0},
+    "mask-editor":      {"tol": 4.0},   # snapshot area is empty in e2e
+    "rules-editor":     {"tol": 4.0},
+    "people":           {"tol": 3.0},
+    "analytics":        {"tol": 3.0},
+    "users":            {"tol": 3.0},
+}
+
+
+def _shoot(page, name):
+    path = BASELINES / f"{name}.png"
+    page.screenshot(path=str(path), animations="disabled")
+    return path
+
+
+def _mean_abs_diff(a: Path, b: Path) -> float:
+    """Per-channel MAD via raw PNG decode — no Pillow/numpy in the venv:
+    Chromium screenshots are RGBA, so pack bytes and compare directly."""
+    import zlib
+
+    def decode(p: Path):
+        raw = p.read_bytes()
+        assert raw[:8] == b"\x89PNG\r\n\x1a\n", f"{p} not a PNG"
+        pos = 8
+        width = height = 0
+        bpp = 3  # Chromium screenshots: colortype 2 (RGB)
+        idat = b""
+        while pos < len(raw):
+            length = int.from_bytes(raw[pos:pos + 4], "big")
+            ctype = raw[pos + 4:pos + 8]
+            data = raw[pos + 8:pos + 8 + length]
+            if ctype == b"IHDR":
+                width = int.from_bytes(data[0:4], "big")
+                height = int.from_bytes(data[4:8], "big")
+                colortype = data[9]
+                bpp = {0: 1, 2: 3, 4: 2, 6: 4}.get(colortype, 3)
+            elif ctype == b"IDAT":
+                idat += data
+            pos += 12 + length
+        # single interlaced-free scanline stream with filter bytes
+        raw_px = zlib.decompress(idat)
+        stride = width * bpp + 1
+        px = bytearray()
+        prev = bytearray(width * bpp)
+        for y in range(height):
+            line = bytearray(raw_px[y * stride:(y + 1) * stride])
+            filt = line[0]
+            line = line[1:]
+            if filt == 1:  # sub
+                for i in range(bpp, len(line)):
+                    line[i] = (line[i] + line[i - bpp]) & 0xFF
+            elif filt == 2:  # up
+                for i in range(len(line)):
+                    line[i] = (line[i] + prev[i]) & 0xFF
+            elif filt == 3:  # average
+                for i in range(len(line)):
+                    left = line[i - bpp] if i >= bpp else 0
+                    line[i] = (line[i] + ((left + prev[i]) >> 1)) & 0xFF
+            elif filt == 4:  # paeth
+                for i in range(len(line)):
+                    a_ = line[i - bpp] if i >= bpp else 0
+                    b_ = prev[i]
+                    c_ = prev[i - bpp] if i >= bpp else 0
+                    pp = a_ + b_ - c_
+                    pa, pb, pc = abs(pp - a_), abs(pp - b_), abs(pp - c_)
+                    pred = a_ if pa <= pb and pa <= pc else (b_ if pb <= pc else c_)
+                    line[i] = (line[i] + pred) & 0xFF
+            px += line
+            prev = line
+        return width, height, bytes(px)
+
+    wa, ha, pa = decode(a)
+    wb, hb, pb = decode(b)
+    assert (wa, ha) == (wb, hb), f"size drift: {wa}x{ha} vs {wb}x{hb}"
+    total = sum(abs(x - y) for x, y in zip(pa, pb, strict=True))
+    return total / len(pa)
+
+
+def _reach_state(page, name):
+    """Navigate the app into the named state (post-login states assume
+    the logged_in fixture)."""
+
+    page.click("#nav button[data-view='dashboard']")
+    page.wait_for_timeout(300)
+    if name == "overview":
+        page.wait_for_timeout(900)
+    elif name == "live-grid":
+        page.click("#nav button[data-view='live']")
+        page.wait_for_selector(".live-tile")
+        page.wait_for_timeout(2200)  # tiles reach their settled state
+    elif name == "event-drawer":
+        page.click("#nav button[data-view='events']")
+        page.wait_for_selector("tr.event-row")
+        page.locator("tr.event-row").first.click()
+        page.wait_for_selector(".drawer:not(.hidden)")
+        page.wait_for_timeout(700)
+    elif name == "timeline":
+        page.click("#nav button[data-view='timeline']")
+        page.wait_for_selector(".tl-svg")
+        page.wait_for_timeout(500)
+    elif name == "cameras-grid":
+        page.click("#nav button[data-view='cameras']")
+        page.wait_for_selector(".cam-card")
+        page.wait_for_timeout(500)
+    elif name in ("mask-editor", "rules-editor"):
+        page.click("#nav button[data-view='cameras']")
+        page.wait_for_selector(".cam-card")
+        page.locator(".cam-card [data-act='detail']").first.click()
+        page.wait_for_selector(".cam-detail")
+        page.click(f"[data-tab='{'masks' if name == 'mask-editor' else 'rules'}']")
+        page.wait_for_timeout(900)
+    elif name == "people":
+        page.click("#nav button[data-view='people']")
+        page.wait_for_selector("[data-person]")
+        page.wait_for_timeout(500)
+    elif name == "analytics":
+        page.click("#nav button[data-view='analytics']")
+        page.wait_for_selector("[data-role='an-widgets']")
+        page.wait_for_timeout(1800)
+    elif name == "users":
+        page.click("#nav button[data-view='users']")
+        page.wait_for_selector("[data-user]")
+        page.wait_for_timeout(500)
+
+
+def _reach_login_state(page, name, server):
+    """Login states need a session-less page — logged_in's context carries
+    the refresh token, so goto() boots straight into the app shell."""
+    if name == "login":
+        page.goto(server["base"] + "/")
+        page.wait_for_selector("#login:not(.hidden)")
+    elif name == "login-error":
+        page.goto(server["base"] + "/")
+        page.fill("#email", "admin@test.com")
+        page.fill("#password", "wrong")
+        page.click("button[type=submit]")
+        page.wait_for_selector("#login-error:not(:empty)")
+
+
+@pytest.mark.parametrize("name,spec", STATES.items())
+def test_visual_state(name, spec, logged_in, server, playwright):
+    page = logged_in
+    page.emulate_media(reduced_motion="reduce")
+
+    def reach():
+        if name in ("login", "login-error"):
+            # fresh, session-less context for the login surfaces
+            b = playwright.chromium.launch()
+            c = b.new_context(viewport={"width": 1440, "height": 900})
+            p2 = c.new_page()
+            p2.emulate_media(reduced_motion="reduce")
+            _reach_login_state(p2, name, server)
+            return p2, lambda: (c.close(), b.close())
+        _reach_state(page, name)
+        return page, lambda: None
+
+    target, cleanup = reach()
+
+    if UPDATE:
+        BASELINES.mkdir(parents=True, exist_ok=True)
+        _shoot(target, name)
+        cleanup()
+        pytest.skip(f"baseline written: {name}.png (commit it)")
+
+    base = BASELINES / f"{name}.png"
+    assert base.exists(), (
+        f"no baseline for {name!r} - run with UPDATE_BASELINES=1 once "
+        "and commit ui_audit/baselines/")
+
+    shot = _shoot(target, f"__current_{name}")
+    cleanup()
+    diff = _mean_abs_diff(base, shot)
+    shot.unlink()  # never leave comparison artifacts behind
+    assert diff <= spec["tol"], (
+        f"{name}: visual drift {diff:.2f} > budget {spec['tol']} - if the "
+        "change is intended, regenerate with UPDATE_BASELINES=1 and commit")

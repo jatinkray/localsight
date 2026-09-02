@@ -11,7 +11,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import io
 import os
 import secrets
 import struct
@@ -111,6 +110,21 @@ def main() -> None:
     init_db(rt)
     seed(rt)
 
+    counts = seed_demo_data(rt)
+    print(
+        f"Seeded: {counts['cameras']} cameras, {counts['persons']} persons, "
+        f"{counts['events']} events (+{counts['segments']} segments, "
+        f"{counts['routes']} alert routes, {counts['tracks']} tracks for analytics)."
+    )
+
+
+def seed_demo_data(rt) -> dict:
+    """Populate a freshly-initialized runtime with the demo dataset.
+
+    Idempotent per-entity (existing cameras/persons are reused), so it can
+    run on top of init_db() roles/admin — including from the UI e2e boot
+    (tests/ui/_boot.py) where the env is a throwaway database.
+    """
     s = rt.SessionLocal()
     now = utcnow()
     n_events = 0
@@ -284,15 +298,13 @@ def main() -> None:
             n_tracks += 1
 
         s.commit()
-        print(
-            f"Seeded: {s.query(Camera).count()} cameras, {s.query(Person).count()} persons, "
-            f"{n_events} events (+{s.query(VideoSegment).count()} segments, "
-            f"{s.query(AlertRoute).count()} alert routes, "
-            f"{n_tracks} tracks for analytics)."
-        )
+        return {
+            "cameras": s.query(Camera).count(), "persons": s.query(Person).count(),
+            "events": n_events, "segments": s.query(VideoSegment).count(),
+            "routes": s.query(AlertRoute).count(), "tracks": n_tracks,
+        }
     finally:
         s.close()
-    _ = io  # silence unused import if struct path used
 
 
 if __name__ == "__main__":

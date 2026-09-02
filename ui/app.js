@@ -7,7 +7,7 @@
 import { $ } from "./core/dom.js";
 import { api, can, restoreSession, logout as apiLogout, hasSession, startRefreshLoop, onAuthEvent } from "./core/api.js";
 import { toast } from "./core/toast.js";
-import { onView, navigate, start as startRouter } from "./core/router.js";
+import { onView, navigate, parseHash, start as startRouter } from "./core/router.js";
 import { openEventDrawer, requestClose } from "./views/event_drawer.js";
 import { wireLogin, resetLogin } from "./views/login.js";
 import { loadDashboard, startAutoRefresh } from "./views/dashboard.js";
@@ -23,6 +23,7 @@ import { loadPrivacy } from "./views/privacy.js";
 import { loadAnalytics, wireAnalytics } from "./views/analytics.js";
 import { wireShortcuts } from "./core/shortcuts.js";
 import { wireDensity, restoreDensity } from "./core/density.js";
+import { wireTelemetry, markView } from "./core/telemetry.js";
 
 function showPanels(view) {
   document.querySelectorAll("#nav button").forEach((b) => {
@@ -113,6 +114,13 @@ function enterApp() {
   $("#app").classList.remove("hidden");
   applyRbacGates();
   startRouter(); // resolve #/ — lands on the URL's view (or dashboard)
+  // Opt-in marks: record each navigation (route() is synchronous in the
+  // earlier-registered hashchange listener; the microtask measures the
+  // dispatch tail — honest diagnostics, not a perf claim).
+  window.addEventListener("hashchange", () => {
+    const t0 = performance.now();
+    queueMicrotask(() => markView(parseHash().view, performance.now() - t0));
+  });
 }
 
 /** Hide chrome the current role can't use. Runs after the session (and
@@ -155,6 +163,7 @@ async function boot() {
   wireLiveView($("#live-out"), $("#live-toolbar"));
   wireAnalytics($("#analytics-list"));
   wireShortcuts();
+  wireTelemetry(); // opt-in local marks — a no-op until enabled in Privacy
   restoreDensity();
   wireDensity($("#density-toggle"));
 

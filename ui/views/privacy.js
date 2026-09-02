@@ -11,6 +11,8 @@ import { api, can } from "../core/api.js";
 import { skeletonRows, errorState } from "../core/states.js";
 import { toast } from "../core/toast.js";
 import { navigate } from "../core/router.js";
+import { isTelemetryOn, setTelemetry, exportTelemetry, telemetrySnapshot }
+  from "../core/telemetry.js";
 
 export async function loadPrivacy(listEl) {
   skeletonRows(listEl, 5);
@@ -36,6 +38,7 @@ export async function loadPrivacy(listEl) {
     retentionCard(cams),
     maskInventoryCard(cams, masks, totalMasks, bareCams),
     erasureCard(people),
+    telemetryCard(),
   ]));
 }
 
@@ -104,6 +107,45 @@ function maskInventoryCard(cams, masks, totalMasks, bareCams) {
       ? h("p", { class: "muted text-xs" },
           `${bareCams} of ${cams.length} cameras analyze their full field of view.`)
       : null);
+}
+
+/** Opt-in UI marks (Wave 5): a LOCAL ring buffer, off by default, exported
+ *  as a file the user keeps. No network. No storage. Honest by design. */
+function telemetryCard() {
+  const body = h("dl", { class: "kv-grid", "data-role": "telemetry-body" });
+  const paint = () => {
+    const snap = telemetrySnapshot();
+    render(body,
+      h("dt", {}, "UI marks"),
+      h("dd", {}, `${snap.count} recorded — view loads, slow views, page errors`),
+      h("dt", {}, "Storage"),
+      h("dd", {}, "memory only, this tab; nothing is stored or sent"),
+      h("dt", {}, "Export"),
+      h("dd", {}, h("button", {
+        class: "ghost", "data-act": "telemetry-export",
+        onClick: () => { exportTelemetry(); toast("Marks downloaded — the file is yours", { tone: "ok" }); },
+      }, "Download JSON")));
+  };
+  paint();
+
+  const toggle = h("button", {
+    class: "ghost", "data-act": "telemetry-toggle",
+    "aria-pressed": String(isTelemetryOn()),
+    onClick: () => {
+      setTelemetry(!isTelemetryOn());
+      toggle.setAttribute("aria-pressed", String(isTelemetryOn()));
+      toggle.textContent = isTelemetryOn() ? "Turn off" : "Turn on";
+      paint();
+    },
+  }, isTelemetryOn() ? "Turn off" : "Turn on");
+
+  return h("div", { class: "card" },
+    h("h3", {}, "UI marks (opt-in)"),
+    h("p", { class: "muted" },
+      "Optional, local-only diagnostics: which views load slowly, whether errors happen. ",
+      "Disabled unless you turn it on; the data never leaves this browser tab, and the download is a file you keep."),
+    toggle,
+    body);
 }
 
 function erasureCard(people) {
