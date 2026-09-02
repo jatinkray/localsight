@@ -15,13 +15,25 @@ const SVG_H = 160;
 const PAD = 28; // left axis room
 
 const RANGES = [
+  { key: "shift", label: "This shift (12h)", days: 0.5 },
   { key: "24h", label: "Last 24 hours", days: 1 },
   { key: "7d", label: "Last 7 days", days: 7 },
   { key: "30d", label: "Last 30 days", days: 30 },
 ];
 
+/** M3/E-11: A/B compare — the previous equal-length window. Selecting a
+ *  range twice as long as the current one gives the delta baseline:
+ *  "this shift vs the shift before it". */
+function compareBounds() {
+  const r = RANGES.find((x) => x.key === sel.range) || RANGES[0];
+  const end = Date.now() - r.days * 86400_000;
+  return { start: new Date(end - r.days * 86400_000).toISOString(),
+           end: new Date(end).toISOString(), days: r.days };
+}
+
 /** Query state for the whole view; every widget re-reads it. */
 let sel = { range: "24h", cameraId: null };
+let compare = false; // M3/E-11: A/B mode — deltas vs the previous window
 
 function isoDaysAgo(days) {
   return new Date(Date.now() - days * 86400_000).toISOString();
@@ -141,6 +153,33 @@ function heatmapCanvas(grid) {
 
 // ── the view ─────────────────────────────────────────────────────────────
 
+/** M3/E-10: shareable analytics — Copy link with range+camera in the hash. */
+function copyBtn() {
+  return h("button", {
+    class: "ghost", "data-act": "an-link", title: "Copy a link that reproduces this view",
+    onClick: () => {
+      const url = `${location.origin}${location.pathname}#/analytics?` +
+        new URLSearchParams({
+          ...(sel.range ? { range: sel.range } : {}),
+          ...(sel.cameraId ? { camera: sel.cameraId } : {}),
+        }).toString();
+      navigator.clipboard.writeText(url).then(
+        () => toast("Link copied — it reproduces this view", { tone: "ok" }),
+        () => toast("Copy failed — the URL bar has the same link", { tone: "warn" }));
+    },
+  }, "Copy link");
+}
+
+/** M3/E-11: preset chips — one-click ranges the way operators think. */
+function presetChips(outEl) {
+  return h("div", { class: "toolbar preset-chips", role: "group", "aria-label": "Range presets" },
+    RANGES.map((r) => h("button", {
+      class: `chip ${sel.range === r.key ? "chip-active" : ""}`,
+      "aria-pressed": String(sel.range === r.key),
+      onClick: () => { sel.range = r.key; loadAnalytics(outEl, {}); },
+    }, r.label)));
+}
+
 export async function loadAnalytics(outEl, params = {}) {
   if (params.range && RANGES.some((r) => r.key === params.range)) sel.range = params.range;
   if (params.camera !== undefined) sel.cameraId = params.camera || null;
@@ -167,8 +206,15 @@ export async function loadAnalytics(outEl, params = {}) {
             h("option", { value: "" }, "All cameras"),
             cams.map((c) => h("option", { value: c.id, selected: c.id === sel.cameraId }, c.name)),
           ),
+          h("button", {
+            class: "ghost", "data-act": "an-compare", "aria-pressed": String(compare),
+            title: "Compare against the previous equal-length window — deltas on headline numbers",
+            onClick: () => { compare = !compare; loadAnalytics(outEl, {}); },
+          }, "Compare"),
+          copyBtn(),
         ),
       ),
+      presetChips(outEl),
       searchBox(outEl),
     ),
     h("div", { class: "an-widgets", "data-role": "an-widgets" },
@@ -184,6 +230,17 @@ export async function loadAnalytics(outEl, params = {}) {
 
 /** Fetch every widget's data in parallel; each renders independently —
  * one failing widget never blanks the page. */
+/** M3/E-11: delta pill — current vs previous window. Green/red only via
+ *  classes (CSP); the number is code-computed, never user data. */
+function deltaPill(cur, prev) {
+  if (prev === 0) return h("span", { class: "pill" }, "no baseline");
+  const d = ((cur - prev) / prev) * 100;
+  const cls = d > 0 ? "ok" : d < 0 ? "warn" : "";
+  const arrow = d > 0 ? "▲" : d < 0 ? "▼" : "＝";
+  return h("span", { class: `pill ${cls}`, "data-role": "delta" },
+    `${arrow} ${Math.abs(d).toFixed(0)}%`);
+}
+
 async function drawWidgets(outEl, start, end, cams) {
   const wrap = outEl.querySelector("[data-role='an-widgets']");
   if (!wrap) return;
@@ -204,6 +261,21 @@ async function drawWidgets(outEl, start, end, cams) {
   const [occ, dwell, brk] = await Promise.all(
     [tasks.occupancy, tasks.dwell, tasks.breakdown]);
 
+  // M3/E-11: A/B fetch — previous window's breakdown (headline deltas)
+  let prevBrk = null;
+  if (compare) {
+    const cb = compareBounds();
+    const cQ = sel.cameraId
+      ? `camera_id=${encodeURIComponent(sel.cameraId)}&start=${encodeURIComponent(cb.start)}&end=${encodeURIComponent(cb.end)}`
+      : `start=${encodeURIComponent(cb.start)}&end=${encodeURIComponent(cb.end)}`;
+    prevBrk = await api(`/api/analytics/breakdown?${cQ}`).catch(() => null);
+  }
+
+  const curTotal = !errOr(brk) && brk.rows
+    ? brk.rows.reduce((s, r) => s + (r.count ?? 0), 0) : 0;
+  const prevTotal = prevBrk && prevBrk.rows
+    ? prevBrk.rows.reduce((s, r) => s + (r.count ?? 0), 0) : 0;
+
   const cards = [];
   cards.push(widget("People-count trend", errOr(occ)
     ? errorState(occ, { noun: "trend", onRetry: () => loadAnalytics(outEl, {}) })
@@ -211,6 +283,14 @@ async function drawWidgets(outEl, start, end, cams) {
   cards.push(widget("Peak occupancy", errOr(occ)
     ? errorState(occ, { noun: "occupancy", onRetry: () => loadAnalytics(outEl, {}) })
     : peakCard(occ.buckets || [])));
+  if (compare && !errOr(brk)) {
+    cards.push(widget("Events vs previous window",
+      h("div", { class: "kv-grid" },
+        h("p", { class: "an-big" }, String(curTotal)),
+        h("p", { class: "muted" },
+          `previous window: ${prevTotal}`),
+        deltaPill(curTotal, prevTotal))));
+  }
   cards.push(widget("Dwell", errOr(dwell)
     ? errorState(dwell, { noun: "dwell", onRetry: () => loadAnalytics(outEl, {}) })
     : dwellCard(dwell.avg_dwell_sec ?? 0)));

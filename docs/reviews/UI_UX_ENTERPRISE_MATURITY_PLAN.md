@@ -235,11 +235,25 @@ their sessions — every action audited; admin can force-reset MFA and
 revoke sessions (typed-confirm). New e2e: full MFA enroll flow with a
 virtual authenticator (RFC 6238 in-test).
 
-### Wave M3 — "Professional density" (E-3, E-7, E-8, E-10, E-11, E-12, E-9) ~2wk
+### Wave M3 — "Professional density" (E-3, E-7, E-8, E-10, E-11, E-12, E-9) ~2wk  ✅ SHIPPED
 Bulk ops where real, compact tables, global toast host, shareable
 filters, analytics presets/compare, command palette, drawer labelling.
-**Exit:** events table in compact mode shows ~2× rows; `Ctrl-K` jumps
-anywhere; "Copy link" on filtered lists reproduces the exact view.
+**Exit (met, verified):** Events bulk selection (25 checkboxes on page,
+select-all, bar with count + "Export selected" — the CSV endpoint takes
+an explicit `ids` list, capped 1k, audited; 25-row bulk export verified);
+compact mode tightens tables for real (36px rows, 24px inline controls,
+WCAG 2.2 reasoning in the toggle tooltip); a single eager `#toast`
+aria-live host created at module load; the drawer is labelled by its
+heading (`aria-labelledby=drawer-title`) from the FIRST frame — skeleton
+included; Copy link on Events/Audit/Analytics round-trips through the
+hash (verified: sort=confidence&direction=asc reproduces ascending);
+Analytics gained This-shift/24h/7d/30d preset chips + Compare mode with
+delta pills (▼19% vs previous window verified); Ctrl-K palette with
+fuzzy subsequence match over views/cameras/persons/recent events, full
+keyboard path, axe-clean (an aria-required-children on the loading state
+was caught and fixed during the wave). e2e 43/43 on regenerated
+baselines; probes green; scan asserts bulk_boxes=25, toast_host,
+copy_link, palette_wired, drawer_labelled — all true.
 
 **Not proposed (deliberately):** theme customization (the token system
 is the brand), dark-mode toggle (already dark, purpose-built),

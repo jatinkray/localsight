@@ -26,7 +26,7 @@ function ensureDrawer() {
     class: "drawer hidden",
     role: "dialog",
     "aria-modal": "true",
-    "aria-label": "Event detail",
+    "aria-labelledby": "drawer-title",
   });
   document.body.append(scrimEl, drawerEl);
 
@@ -154,6 +154,12 @@ export async function openEventDrawer(eventId, { onClose } = {}) {
   lastFocused = document.activeElement;
 
   render(drawer, h("div", { class: "drawer-body" },
+    // E-9: the heading exists from the FIRST frame — the dialog is
+    // labelled by it even while content loads.
+    h("div", { class: "drawer-head" },
+      h("h2", { id: "drawer-title" }, "Event detail"),
+      h("button", { class: "ghost drawer-close", type: "button",
+        "aria-label": "Close event detail", onClick: () => requestClose() }, "✕")),
     h("div", { class: "skeleton skeleton-card" }),
     h("div", { class: "skeleton skeleton-row" }),
     h("div", { class: "skeleton skeleton-row" }),
@@ -170,7 +176,7 @@ export async function openEventDrawer(eventId, { onClose } = {}) {
     const durSec = (new Date(ev.timestamp_end) - new Date(ev.timestamp_start)) / 1000;
 
     const head = h("div", { class: "drawer-head" },
-      h("h2", {}, label(ev.event_type)),
+      h("h2", { id: "drawer-title" }, label(ev.event_type)),
       h("button", {
         class: "ghost drawer-close", type: "button",
         "aria-label": "Close event detail", onClick: () => requestClose(),
@@ -257,7 +263,7 @@ export async function openEventDrawer(eventId, { onClose } = {}) {
   } catch (err) {
     render(drawer, h("div", { class: "drawer-body" },
       h("div", { class: "drawer-head" },
-        h("h2", {}, "Event detail"),
+        h("h2", { id: "drawer-title" }, "Event detail"),
         h("button", { class: "ghost drawer-close", type: "button", onClick: () => requestClose() }, "✕"),
       ),
       err.status === 404

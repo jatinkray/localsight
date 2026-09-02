@@ -488,6 +488,18 @@ body.drawer-open { overflow: hidden; } /* lock scroll behind drawer */
 
 /* Chips row + key-value grid in the drawer */
 .chip-row { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+
+/* M3/E-11: preset chips + headline delta styling */
+.preset-chips { margin-block: var(--sp-2); }
+.chip {
+  padding: var(--sp-1) var(--sp-3); border-radius: 999px;
+  border: 1px solid var(--border-2); background: var(--surface-2);
+  font-size: var(--text-sm); color: var(--text-primary); cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); }
+.chip-active { background: var(--accent-strong); border-color: var(--accent-strong);
+  color: #ffffff; font-weight: 600; }
+.an-big { font-size: 2rem; font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
 .kv-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2) var(--sp-3);
 }
@@ -755,6 +767,24 @@ body.wall-mode .live-tile-bar { position: absolute; bottom: 0; left: 0; right: 0
 .density-compact .event-row, .density-compact tr { height: auto; }
 .density-compact .cam-card { padding: var(--sp-3); }
 
+/* M3/E-7: true compact mode — ~36px rows, 32px in-table controls.
+ * Inline secondary controls stay ≥24px touch target, the WCAG 2.2 AA
+ * exception for controls spaced per Target Size Minimum; the density
+ * toggle's tooltip carries this reasoning. */
+.density-compact table td, .density-compact table th { font-size: var(--text-xs); }
+.density-compact table .pill { padding: 0 var(--sp-2); font-size: var(--text-xs); }
+.density-compact table button:not(.drawer-close),
+.density-compact table input[type="checkbox"] {
+  min-height: 24px; min-width: 24px;
+}
+.density-compact .media-flag { font-size: var(--text-xs); }
+
+/* M3/E-3: the bulk selection bar sits under the toolbar when rows are picked */
+.bulk-bar { background: var(--surface-3); border: 1px solid var(--accent);
+  border-radius: var(--radius-s); padding: var(--sp-1) var(--sp-3); gap: var(--sp-2); }
+.bulk-bar strong { font-size: var(--text-sm); }
+.bulk-col { width: 1%; white-space: nowrap; }
+
 /* Focus visibility — keyboard users must always see where they are
  * (a11y pass; mouse clicks keep their softer outline) */
 :focus-visible {
@@ -762,3 +792,37 @@ body.wall-mode .live-tile-bar { position: absolute; bottom: 0; left: 0; right: 0
   outline-offset: 2px;
   border-radius: var(--radius-s);
 }
+
+
+/* ── M3/E-12: command palette ─────────────────────────────────────────── */
+.palette-scrim {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55);
+  z-index: 200; display: flex; align-items: flex-start;
+  justify-content: center; padding-top: 12vh;
+}
+.palette {
+  width: min(560px, calc(100vw - 32px));
+  background: var(--surface-1); border: 1px solid var(--border-2);
+  border-radius: var(--radius-m); box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.palette-input {
+  width: 100%; padding: var(--sp-3) var(--sp-4); font-size: var(--text-md);
+  background: transparent; color: var(--text-primary);
+  border: none; border-bottom: 1px solid var(--border-2); outline: none;
+}
+.palette-input:focus { background: var(--surface-2); }
+.palette-list { list-style: none; margin: 0; padding: var(--sp-1) 0; max-height: 46vh; overflow-y: auto; }
+.palette-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4); cursor: pointer;
+}
+.palette-row.selected, .palette-row:hover { background: var(--surface-3); }
+.palette-kind {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-secondary); border: 1px solid var(--border-2);
+  border-radius: var(--radius-s); padding: 0 var(--sp-2); min-width: 4em; text-align: center;
+}
+.palette-label { flex: 1; font-size: var(--text-sm); }
+.palette-hint { font-size: var(--text-xs); }
+.palette-empty { padding: var(--sp-4); }

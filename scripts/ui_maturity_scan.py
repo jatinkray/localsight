@@ -38,11 +38,13 @@ SHOTS = OUT / "shots"
 
 # ── states: (id, nav-view or None, extra reach steps) ─────────────────────
 def _st(state_id, view=None, click=None, wait=None, click2=None,
-        wait2=None, settle=None):
+        wait2=None, settle=None, key=None):
     """Build one state record (kept short per-line for lint)."""
     d = {"id": state_id}
     if view:
         d["view"] = view
+    if key:
+        d["key"] = key
     if click:
         d["click"] = click
     if wait:
@@ -85,6 +87,8 @@ STATES: list[dict] = [
     _st("audit", view="audit"),
     # M2: the account story — self-service security
     _st("account", view="account", wait="[data-view-root='account']", settle=800),
+    # M3/E-12: the command palette (Ctrl-K)
+    _st("palette", view="dashboard", key="Control+k", wait=".palette", settle=900),
 ]
 
 # metrics harvested from the live DOM (pure reads)
@@ -140,6 +144,15 @@ METRIC_JS = """() => {
     password_form: !!document.querySelector("[data-form='pw-change']"),
     session_rows: document.querySelectorAll("[data-session]").length,
     tz_picker: !!document.querySelector("[data-field='tz']"),
+    // M3/E-3/E-8/E-9/E-10: density, bulk, feedback host, labelled drawer
+    bulk_boxes: document.querySelectorAll("[data-bulk]").length,
+    toast_host: !!document.getElementById("toast"),
+    copy_link: [...document.querySelectorAll("#ev-link,#au-link,[data-act='an-link']")].length,
+    drawer_labelled: (() => {
+      const d = document.querySelector(".drawer");
+      return d ? (d.getAttribute("aria-labelledby") || "") : "";
+    })(),
+    palette_wired: !!document.querySelector(".palette"),
   };
   // forms: labeled vs orphan controls
   const inputs = [...document.querySelectorAll('input:not([type=hidden]),select,textarea')];
@@ -205,6 +218,10 @@ def reach(page, st):
         page.locator(st["click2"]).first.click()
         if "wait2" in st:
             page.wait_for_selector(st["wait2"], timeout=8000)
+    if "key" in st:
+        page.keyboard.press(st["key"])
+        if "wait" in st:
+            page.wait_for_selector(st["wait"], timeout=8000)
     page.wait_for_timeout(600)
 
 

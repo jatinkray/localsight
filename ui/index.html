@@ -61,7 +61,8 @@
       <span class="trust-chip" title="Video, faces and credentials are encrypted on this host — nothing leaves it.">
         <span aria-hidden="true">🔒</span> Local · Encrypted
       </span>
-      <button id="density-toggle" class="ghost" aria-pressed="false"><span>Comfortable</span></button>
+      <button id="density-toggle" class="ghost" aria-pressed="false"
+        title="Comfortable 40px rows / Compact 36px rows with 24px inline controls — WCAG 2.2 AA target-size exception applies to secondary table controls"><span>Comfortable</span></button>
       <button id="logout" class="ghost">Sign out</button>
     </header>
 
@@ -117,6 +118,12 @@
             </select>
             <button id="ev-search" class="primary">Search</button>
             <button id="ev-export" class="ghost" title="Export the current result set as CSV — audited">Export CSV</button>
+            <button id="ev-link" class="ghost" title="Copy a link that reproduces this exact view">Copy link</button>
+          </div>
+          <div id="ev-bulk-bar" class="toolbar bulk-bar hidden" role="status">
+            <strong><span id="ev-bulk-count">0</span> selected</strong>
+            <button id="ev-bulk-export" class="primary" title="Export only the selected events — audited">Export selected</button>
+            <button id="ev-bulk-clear" class="ghost">Clear selection</button>
           </div>
           <div id="events-wrap"></div>
           <div class="pager">
@@ -192,6 +199,7 @@
             <button id="au-export" class="ghost" title="Export the filtered trail as CSV — audited">Export CSV</button>
           </div>
           <div class="toolbar" id="audit-filters">
+            <button id="au-link" class="ghost" title="Copy a link that reproduces this filtered trail">Copy link</button>
             <input id="au-user" class="mono" placeholder="User (contains)" aria-label="Filter by user" />
             <select id="au-action" aria-label="Filter by action">
               <option value="">Any action</option>

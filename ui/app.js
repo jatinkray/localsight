@@ -24,6 +24,7 @@ import { loadPrivacy } from "./views/privacy.js";
 import { loadAnalytics, wireAnalytics } from "./views/analytics.js";
 import { wireShortcuts } from "./core/shortcuts.js";
 import { wireDensity, restoreDensity } from "./core/density.js";
+import { wirePalette } from "./core/palette.js";
 import { wireTelemetry, markView } from "./core/telemetry.js";
 
 function showPanels(view) {
@@ -110,9 +111,9 @@ onView("account", () => {
   loadAccount($("#account-list"));
 });
 
-onView("audit", () => {
+onView("audit", (params) => {
   showPanels("audit");
-  loadAudit($("#audit-list"));
+  loadAudit($("#audit-list"), { params });
 });
 
 function enterApp() {
@@ -172,6 +173,7 @@ async function boot() {
   wireTelemetry(); // opt-in local marks — a no-op until enabled in Privacy
   restoreDensity();
   wireDensity($("#density-toggle"));
+  wirePalette(); // Ctrl-K command palette (M3/E-12)
 
   $("#add-camera").addEventListener("click", () => navigate("cameras", { id: "new" }));
   $("#person-add").addEventListener("click", () => navigate("people", { new: "1" }));

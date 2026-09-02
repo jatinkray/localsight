@@ -9,12 +9,22 @@ let stack = null;
 function ensureStack() {
   if (!stack) {
     stack = document.createElement("div");
+    stack.id = "toast";
     stack.className = "toast-stack";
     stack.setAttribute("role", "status");
     stack.setAttribute("aria-live", "polite");
     document.body.append(stack);
   }
   return stack;
+}
+
+// M3/E-8: create the host EAGERLY at module load — assistive tech finds
+// one stable #toast region on page load, before any announcement fires
+// (a lazily-created region can be missed by some SRs on first speak).
+if (typeof document !== "undefined" && document.body) {
+  ensureStack();
+} else {
+  document.addEventListener("DOMContentLoaded", () => ensureStack(), { once: true });
 }
 
 /**

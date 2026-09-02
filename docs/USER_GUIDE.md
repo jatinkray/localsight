@@ -292,6 +292,23 @@ The **Account** view (last nav item) is self-service security:
 - **Timezone** — choose how times are displayed to you (stored in UTC,
   rendered in your choice; per-browser, never uploaded).
 
+## Working faster (M3)
+
+- **Ctrl-K command palette** — jump to any view, camera, person, or recent
+  event by typing part of the name. Full keyboard path: ↑↓ select, Enter
+  go, Esc close.
+- **Bulk selection (Events)** — checkbox rows or select-all; the bulk
+  bar exports exactly the selected events (audited like every export).
+- **Copy link (Events, Audit, Analytics)** — copies a URL that
+  reproduces the current filters AND sort. "Send me what you see" is a
+  link, not a screenshot.
+- **Compare (Analytics)** — deltas of headline numbers against the
+  previous equal-length window ("this shift vs the shift before"),
+  plus one-click range presets (This shift, 24h, 7d, 30d).
+- **Compact density** — the header toggle now tightens tables for real
+  (~36px rows, 24px inline controls per the WCAG 2.2 target-size
+  exception; the tooltip explains the reasoning).
+
 ## Keyboard shortcuts
 
 The console is fully operable without a mouse:
@@ -307,6 +324,7 @@ The console is fully operable without a mouse:
 | `f` | Fullscreen wall mode (Live view) |
 | `Esc` | Close drawer / overlay / wall |
 | `?` | The shortcut overlay |
+| `Ctrl-K` / `Cmd-K` | Command palette — jump anywhere |
 
 ## Density
 

@@ -9,6 +9,7 @@ import { api } from "../core/api.js";
 import { toast } from "../core/toast.js";
 import { skeletonRows, emptyState, errorState } from "../core/states.js";
 import { fmtDateTime, label, tone } from "../core/format.js";
+import { navigate, replace } from "../core/router.js";
 
 const PAGE = 25;
 let offset = 0;
@@ -34,8 +35,23 @@ function qs() {
   });
 }
 
-export async function loadAudit(listEl, { resetOffset = false } = {}) {
+export async function loadAudit(listEl, { resetOffset = false, params = {} } = {}) {
   if (resetOffset) offset = 0;
+  // E-10: deep-linkable audit state — hash restores filters + sort.
+  // (Router loads pass params; in-view reloads pass none — keep state.)
+  if (params && Object.keys(params).length) {
+    filters = {
+      username: params.username || "", action: params.action || "",
+      result: params.result || "", start: params.start || "", end: params.end || "",
+    };
+    if (params.sort) sortKey = params.sort;
+    if (params.direction) sortDir = params.direction;
+    for (const [id, v] of [["au-user", filters.username], ["au-action", filters.action],
+      ["au-result", filters.result], ["au-start", filters.start], ["au-end", filters.end]]) {
+      const el = document.getElementById(id);
+      if (el && el.value !== v) el.value = v;
+    }
+  }
   skeletonRows(listEl, 6);
   try {
     const data = await api(`/api/audit?${qs()}`);
@@ -58,6 +74,7 @@ export async function loadAudit(listEl, { resetOffset = false } = {}) {
           if (sortKey === key) sortDir = sortDir === "asc" ? "desc" : "asc";
           else { sortKey = key; sortDir = "asc"; }
           offset = 0;
+          replace("audit", { ...filters, sort: sortKey, direction: sortDir });
           loadAudit(listEl);
         } } : {}),
       }, text);
@@ -103,7 +120,8 @@ export function wireAuditView(listEl) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", () => {
       filters[key] = el.value.trim();
-      loadAudit(listEl, { resetOffset: true });
+      // E-10: filters live in the hash — the trail is shareable
+      navigate("audit", { ...filters, sort: sortKey, direction: sortDir });
     });
   };
   bind("au-user", "username");
@@ -122,6 +140,18 @@ export function wireAuditView(listEl) {
     offset += PAGE;
     loadAudit(listEl);
   });
+
+  const copyBtn = document.getElementById("au-link");
+  if (copyBtn && !copyBtn.dataset.wired) {
+    copyBtn.dataset.wired = "1";
+    copyBtn.addEventListener("click", () => {
+      const url = `${location.origin}${location.pathname}#/audit?` +
+        new URLSearchParams({ ...filters, sort: sortKey, direction: sortDir }).toString();
+      navigator.clipboard.writeText(url).then(
+        () => toast("Link copied — it reproduces this filtered trail", { tone: "ok" }),
+        () => toast("Copy failed — the URL bar has the same link", { tone: "warn" }));
+    });
+  }
 
   const exportBtn = document.getElementById("au-export");
   if (exportBtn && !exportBtn.dataset.wired) {

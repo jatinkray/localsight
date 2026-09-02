@@ -94,17 +94,22 @@ def export_events_csv(
     start: str | None = None,
     end: str | None = None,
     min_confidence: float | None = None,
+    ids: str | None = None,
     sort: str | None = Query(
         None, pattern="^(timestamp|camera|type|identity|confidence|duration)$"),
     direction: str | None = Query(None, pattern="^(asc|desc)$"),
 ):
     """Stream the CURRENT result set (M1/E-2) as CSV — same filters as the
     list, capped at 50k rows, audited like every export. Never invents a
-    download link that outlives the request."""
+    download link that outlives the request. `ids` (comma-separated) narrows
+    to an explicit bulk selection (M3/E-3)."""
     from fastapi.responses import StreamingResponse
 
     q = select(Event)
-    if camera_id:
+    if ids:
+        wanted = [i.strip() for i in ids.split(",") if i.strip()][:1000]
+        q = q.where(Event.id.in_(wanted))
+    elif camera_id:
         q = q.where(Event.camera_id == camera_id)
     if identity_status:
         q = q.where(Event.identity_status == identity_status)
