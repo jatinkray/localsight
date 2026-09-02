@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
-from apps.api.dependencies import get_db, get_runtime, require_permission
+from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from packages.domain.models import Camera, NvrDevice, Snapshot, VideoSegment
 from packages.domain.schemas import TPLinkNvrSeed
 from packages.security.crypto import CryptoBox
@@ -281,8 +281,34 @@ def get_camera(camera_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/cameras/{camera_id}/snapshot", dependencies=[Depends(require_permission("camera:view"))])
-def camera_snapshot(camera_id: str, db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)):
+@router.get("/cameras/{camera_id}/snapshot-url", dependencies=[Depends(require_permission("camera:view"))])
+def camera_snapshot_url(camera_id: str, db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)):
+    """Mint a short-lived signed URL for the snapshot endpoint.
+
+    The mask editor's <img> cannot carry the in-memory bearer token (the
+    browser attaches no Authorization header to image loads), so the frame
+    is fetched with an HMAC-signed query instead — same scheme the storage
+    layer uses for event media (exp + sig over "camera-snapshot:{id}"),
+    300 s lifetime, constant-time comparison.
+    """
+    import hashlib
+    import hmac as hmac_mod
+    import time as time_mod
+
+    cam = db.get(Camera, camera_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="camera not found")
+    key = f"camera-snapshot:{camera_id}"
+    exp = int(time_mod.time()) + 300
+    msg = f"{key}:{exp}".encode()
+    mac = hmac_mod.new(rt.settings.master_encryption_key.encode(), msg, hashlib.sha256)
+    return {"url": f"/api/cameras/{camera_id}/snapshot?exp={exp}&sig={mac.hexdigest()}",
+            "expires_at": exp}
+
+
+@router.get("/cameras/{camera_id}/snapshot")
+def camera_snapshot(request: Request, camera_id: str, db: Session = Depends(get_db),
+                    rt: Runtime = Depends(get_runtime), exp: str = "", sig: str = ""):
     """One JPEG frame from the camera — for the privacy-mask editor canvas,
     add-camera verification, and live-tile posters.
 
@@ -291,12 +317,46 @@ def camera_snapshot(camera_id: str, db: Session = Depends(get_db), rt: Runtime =
       * 404 camera unknown
       * 409 no stream URL configured
       * 503 stream unreachable / ffmpeg missing (or no frame within timeout)
+
+    Auth (either):
+      * a session bearer token with camera:view, OR
+      * the signed exp/sig pair minted by /snapshot-url — <img> loads can't
+        send Authorization headers, so the canvas uses the signed form.
     """
+    import hashlib
+    import hmac as hmac_mod
     import subprocess
+    import time as time_mod
 
     cam = db.get(Camera, camera_id)
     if not cam:
         raise HTTPException(status_code=404, detail="camera not found")
+
+    # ── auth: session token OR valid signature ──────────────────────────
+    authorized = False
+    authz = request.headers.get("Authorization", "")
+    if authz.startswith("Bearer "):
+        try:
+            get_current_user(request, db)  # raises 401 itself if invalid
+            authorized = "camera:view" in getattr(request.state, "permissions", set())
+        except HTTPException:
+            authorized = False
+    if not authorized and exp and sig:
+        try:
+            exp_i = int(exp)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bad exp") from None
+        if exp_i < int(time_mod.time()):
+            raise HTTPException(status_code=410, detail="signed URL expired")
+        key = f"camera-snapshot:{camera_id}"
+        expected = hmac_mod.new(rt.settings.master_encryption_key.encode(),
+                                f"{key}:{exp_i}".encode(), hashlib.sha256).hexdigest()
+        if hmac_mod.compare_digest(expected, sig):
+            authorized = True
+    if not authorized:
+        raise HTTPException(status_code=401,
+                            detail="camera snapshot needs a session or a signed URL")
+
     url_enc = cam.substream_url_enc or cam.stream_url_enc
     if not url_enc:
         raise HTTPException(status_code=409, detail="no stream URL configured")

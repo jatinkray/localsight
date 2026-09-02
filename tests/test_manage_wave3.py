@@ -59,6 +59,36 @@ def test_snapshot_never_leaks_url(client, admin_auth):
     assert "rtsp://" not in res.text
 
 
+def test_snapshot_signed_url_roundtrip(client, admin_auth):
+    """The <img> path: mint a signed URL, fetch WITHOUT the bearer header."""
+    cam_id = _make_camera(client, admin_auth, name="Signed Cam")
+    mint = client.get(f"/api/cameras/{cam_id}/snapshot-url", headers=admin_auth)
+    assert mint.status_code == 200
+    url = mint.json()["url"]
+    assert url.startswith(f"/api/cameras/{cam_id}/snapshot?exp=")
+    # strip the base path — TestClient wants the path+query only
+    res = client.get(url)  # no Authorization header
+    # unreachable public IP -> honest 503, but AUTH PASSED (not 401)
+    assert res.status_code == 503
+
+
+def test_snapshot_signed_url_rejects_tampering(client, admin_auth):
+    cam_id = _make_camera(client, admin_auth, name="Tamper Cam")
+    mint = client.get(f"/api/cameras/{cam_id}/snapshot-url", headers=admin_auth).json()
+    url = mint["url"]
+    # tamper with the signature
+    bad = url.replace("sig=", "sig=deadbeef") if "sig=deadbeef" not in url else url
+    res = client.get(bad)
+    assert res.status_code in (401, 403)
+
+
+def test_snapshot_no_auth_fails_closed(client, admin_auth):
+    cam_id = _make_camera(client, admin_auth, name="Closed Cam")
+    # request with NO auth at all — fail closed
+    res = client.get(f"/api/cameras/{cam_id}/snapshot")
+    assert res.status_code == 401
+
+
 # ── person references + faces_enrolled ───────────────────────────────────
 
 def _make_person(client, admin_auth, label="w3-person"):
