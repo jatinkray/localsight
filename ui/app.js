@@ -20,6 +20,9 @@ import { loadAudit } from "./views/audit.js";
 import { loadAlertsAdmin } from "./views/alerts_admin.js";
 import { loadUsers } from "./views/users.js";
 import { loadPrivacy } from "./views/privacy.js";
+import { loadAnalytics, wireAnalytics } from "./views/analytics.js";
+import { wireShortcuts } from "./core/shortcuts.js";
+import { wireDensity, restoreDensity } from "./core/density.js";
 
 function showPanels(view) {
   document.querySelectorAll("#nav button").forEach((b) => {
@@ -96,6 +99,10 @@ onView("privacy", () => {
   showPanels("privacy");
   loadPrivacy($("#privacy-list"));
 });
+onView("analytics", (params) => {
+  showPanels("analytics");
+  loadAnalytics($("#analytics-list"), params);
+});
 onView("audit", () => {
   showPanels("audit");
   loadAudit($("#audit-list"));
@@ -146,6 +153,10 @@ async function boot() {
   });
   wireEventsView($("#events-wrap"));
   wireLiveView($("#live-out"), $("#live-toolbar"));
+  wireAnalytics($("#analytics-list"));
+  wireShortcuts();
+  restoreDensity();
+  wireDensity($("#density-toggle"));
 
   $("#add-camera").addEventListener("click", () => navigate("cameras", { id: "new" }));
   $("#person-add").addEventListener("click", () => navigate("people", { new: "1" }));

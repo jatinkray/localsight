@@ -24,6 +24,7 @@
   font-weight: 700;
   letter-spacing: 0.2px;
   white-space: nowrap;
+  margin: 0; /* h1 reset — the brand is the app-level heading (Wave-4 a11y) */
 }
 .brand .brand-mark {
   width: 26px; height: 26px;
@@ -112,11 +113,12 @@ main {
   margin-bottom: var(--sp-4);
 }
 .stat { margin-bottom: 0; }
-.stat h3 {
+.stat h3, .stat h2.an-widget-title {
   font-size: var(--text-sm);
   color: var(--text-secondary);
   font-weight: 600;
   margin-bottom: var(--sp-1);
+  margin-top: 0;
   display: flex; align-items: center; gap: var(--sp-2);
 }
 .stat .big {
@@ -687,3 +689,67 @@ body.wall-mode .live-tile-bar { position: absolute; bottom: 0; left: 0; right: 0
 .kv-grid { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-2) var(--sp-4); }
 .kv-grid dt { color: var(--text-tertiary); font-size: var(--text-sm); }
 .kv-grid dd { margin: 0; font-size: var(--text-sm); }
+
+/* ═══ WAVE 4 — ANALYTICS & POLISH ═════════════════════════════════════ */
+
+/* Analytics layout: controls row + responsive widget grid */
+.an-grid { display: flex; flex-direction: column; gap: var(--sp-4); }
+.an-controls .panel-head { flex-wrap: wrap; gap: var(--sp-3); }
+.an-widgets {
+  display: grid; gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.an-widget { display: flex; flex-direction: column; gap: var(--sp-3); }
+.an-widget-title { font-size: var(--text-md); font-weight: 600; }
+.an-span-2 { grid-column: span 2; }
+.an-span-full { grid-column: 1 / -1; }
+@media (max-width: 900px) { .an-span-2 { grid-column: auto; } }
+
+/* Charts (SVG attribute geometry — CSP-safe by construction) */
+.an-chart { width: 100%; height: auto; }
+.an-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.an-dot { fill: var(--accent); }
+.axis-label { fill: var(--text-tertiary); font-size: 10px; }
+.an-bar { fill: var(--accent); opacity: 0.85; }
+.an-kv { display: flex; flex-direction: column; gap: var(--sp-1); align-items: flex-start; }
+.an-peak { font-size: var(--text-2xl); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Heatmap */
+.an-heat-wrap { display: flex; flex-direction: column; gap: var(--sp-2); }
+.an-heat {
+  width: 100%; border: 1px solid var(--border-1); border-radius: var(--radius-s);
+  background: var(--surface-1);
+  aspect-ratio: 16 / 9; image-rendering: pixelated;
+}
+
+/* NL search */
+.an-search { display: flex; flex-direction: column; gap: var(--sp-2); }
+.an-search input[type="search"] { width: 100%; }
+.an-examples { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.an-examples .linklike { font-size: var(--text-xs); }
+
+/* Shortcuts overlay (?) */
+.shortcut-card { max-width: 560px; margin: 12vh auto; }
+.shortcut-grid {
+  display: grid; grid-template-columns: auto 1fr; gap: var(--sp-3) var(--sp-4);
+  align-items: center;
+}
+.shortcut-key {
+  font-family: var(--mono); font-size: var(--text-xs); padding: 2px var(--sp-2);
+  border: 1px solid var(--border-2); border-bottom-width: 2px;
+  border-radius: var(--radius-s); background: var(--surface-2); white-space: nowrap;
+}
+.shortcut-desc { font-size: var(--text-sm); color: var(--text-secondary); }
+
+/* Density toggle — comfortable 40px rows (default) vs compact 32px */
+.density-compact table td, .density-compact table th { padding-block: var(--sp-1); }
+.density-compact .event-row, .density-compact tr { height: auto; }
+.density-compact .cam-card { padding: var(--sp-3); }
+
+/* Focus visibility — keyboard users must always see where they are
+ * (a11y pass; mouse clicks keep their softer outline) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-s);
+}
