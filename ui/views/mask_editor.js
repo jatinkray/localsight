@@ -72,8 +72,13 @@ export function maskEditor(body, cam) {
         class: "mask-rect draft", "data-mask": "draft", rx: 4,
       }));
     }
-    render(canvasWrap, [
-      h("img", {
+    // The snapshot <img> is created once and kept across redraws: the drag
+    // path re-renders geometry many times a second — re-creating the img
+    // would re-request the expiring signed URL (and re-fire onError/onLoad)
+    // on every mousemove. Geometry re-renders into the stable SVG overlay.
+    let img = canvasWrap.querySelector("img.mask-snapshot");
+    if (!img && snapshotSrc) {
+      img = h("img", {
         src: snapshotSrc,
         alt: `Snapshot from ${cam.name}`,
         class: "mask-snapshot",
@@ -81,14 +86,20 @@ export function maskEditor(body, cam) {
           "Snapshot unavailable (camera offline or unreachable) — masks still editable below on the plain canvas."; },
         onLoad: () => { if (statusEl.textContent.startsWith("Loading")) statusEl.textContent =
           "Drag to draw a mask over what this camera must NOT analyze. Each mask needs a reason (compliance record)."; },
-      }),
-      svgEl("svg", {
+      });
+      canvasWrap.append(img);
+    }
+    let svg = canvasWrap.querySelector("[data-role='overlay']");
+    if (!svg) {
+      svg = svgEl("svg", {
         viewBox: `0 0 ${SVG_W} ${SVG_H}`,
         class: "mask-overlay",
         "data-role": "overlay",
         preserveAspectRatio: "none",
-      }, ...rects),
-    ]);
+      });
+      canvasWrap.append(svg);
+    }
+    render(svg, ...rects);
     renderList();
   }
 
