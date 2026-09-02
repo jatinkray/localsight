@@ -17,6 +17,20 @@ rest and audited.
 4. **Security-first** — Argon2id, RBAC, envelope encryption, SSRF guard, audit log, signed URLs.
 5. **Fail safe** — one camera dying never takes down the platform; automatic reconnect + backoff.
 
+## The console, in practice
+
+Real screenshots of the running product (demo dataset, admin role):
+
+| | |
+|---|---|
+| ![Overview](docs/img/overview.png) | ![Events](docs/img/events-bulk.png) |
+| **Overview** — NOC screen: cameras, events, health, alert feed | **Events** — sortable, bulk-select, audited CSV export |
+| ![Drawer](docs/img/event-drawer.png) | ![Account](docs/img/account.png) |
+| **Evidence drawer** — playback, context, signed clip export | **Account** — password, TOTP MFA, sessions, timezone |
+
+More in [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) (every section shows its
+screen) and the [product tour on the project site](https://jatinkray.github.io/localsight.github.io/).
+
 ## Capabilities
 
 | Area | Status | Notes |

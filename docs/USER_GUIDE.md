@@ -6,6 +6,11 @@ alerts, and configuring privacy controls. For developer/agent documentation
 see `AGENTS.md`; for operations (deployment, retention, troubleshooting) see
 `docs/operations/runbook.md`.
 
+> The screenshots in this guide are real captures of the running product
+> (demo dataset, admin role). Files live in `docs/img/`; regenerate them any
+> time with the console running and a screenshot tool — the states match the
+> e2e suite's visual baselines.
+
 ## Contents
 1. [Logging in](#logging-in)
 2. [Dashboards at a glance](#dashboards-at-a-glance)
@@ -17,15 +22,19 @@ see `AGENTS.md`; for operations (deployment, retention, troubleshooting) see
    - [Behavior rules](#behavior-rules)
    - [Per-camera retention](#per-camera-retention)
 4. [Live view](#live-view)
-5. [Analytics](#analytics) — incl. [natural-language search](#natural-language-search)
-6. [Keyboard shortcuts](#keyboard-shortcuts)
-7. [Density](#density)
-8. [Events, search & clips](#events-search--clips)
-9. [Alerts](#alerts) — incl. the [Alerts screen](#the-alerts-screen-wave-3)
-10. [People & enrollment](#people--enrollment) — incl. the
+5. [Overview (the NOC screen)](#overview-the-noc-screen)
+6. [Analytics](#analytics) — incl. [natural-language search](#natural-language-search)
+7. [Sorting, exporting and unambiguous time (M1)](#sorting-exporting-and-unambiguous-time-m1)
+8. [Your account (M2)](#your-account-m2)
+9. [Working faster (M3)](#working-faster-m3)
+10. [Keyboard shortcuts](#keyboard-shortcuts)
+11. [Density](#density)
+12. [Events, search & clips](#events-search--clips)
+13. [Alerts](#alerts) — incl. the [Alerts screen](#the-alerts-screen-wave-3)
+14. [People & enrollment](#people--enrollment) — incl. the
     [Identities screen](#the-identities-screen-wave-3)
-11. [Users & the Privacy dashboard (Wave 3)](#users--the-privacy-dashboard-wave-3)
-12. [What is encrypted, and where](#what-is-encrypted-and-where)
+15. [Users & the Privacy dashboard (Wave 3)](#users--the-privacy-dashboard-wave-3)
+16. [What is encrypted, and where](#what-is-encrypted-and-where)
 
 *(Wave 5 note: the Privacy view also carries the opt-in UI-marks card
 described above.)*
@@ -33,6 +42,9 @@ described above.)*
 ---
 
 ## Logging in
+
+![The sign-in screen — credentials + optional TOTP code.](img/login.png)
+
 
 1. Browse to the deployment URL (the dashboard is served at `/`).
 2. Sign in with the account your administrator created (first boot creates
@@ -52,6 +64,9 @@ temporarily locked — try again in a few minutes" (the lock triggers after
 
 ## Dashboards at a glance
 
+![The unified timeline merges events with recording segments.](img/timeline.png)
+
+
 The web UI is a single-page dashboard served from the deployment URL:
 
 - **Overview** — stat cards, camera strip, 24h event trend, recent events,
@@ -70,6 +85,9 @@ error states with Retry — no blank screens. What you see depends on your
 role's permissions; endpoints you lack permission for return 403.
 
 ## Managing cameras
+
+![The camera grid: health at a glance, detail tabs behind each card.](img/cameras.png)
+
 
 Cameras are added by an administrator (`camera:configure` permission) via
 `POST /api/cameras` or the dashboard. Stream URLs (RTSP, with or without
@@ -191,6 +209,9 @@ defaults: recordings 7 days, events 30 days, snapshots 14 days, embeddings
 
 ## Live view
 
+![The live wall with per-camera tiles and honest states.](img/live.png)
+
+
 Live view streams each camera's substream, transcoded locally to LL-HLS.
 The RTSP URL and camera credentials never reach your browser.
 
@@ -213,6 +234,9 @@ proportional to actual viewing.
 
 ## Overview (the NOC screen)
 
+![Overview: camera strip, live counts, health, recent events, alert feed.](img/overview.png)
+
+
 The Overview refreshes itself every 15 seconds while visible and pauses
 when the tab is hidden:
 
@@ -226,6 +250,9 @@ when the tab is hidden:
 - **Health** — per-component status with model names.
 
 ## Analytics
+
+![Analytics: preset chips, compare toggle, widget cards.](img/analytics.png)
+
 
 The Analytics view answers "what happened here" over archived data — one
 time-range (24h / 7d / 30d) and one camera filter shared by every widget:
@@ -258,6 +285,9 @@ filters too.
 
 ## Sorting, exporting and unambiguous time (M1)
 
+![Events with sortable headers, bulk selection bar and CSV export.](img/events-bulk.png)
+
+
 Every data table (Events, Audit) is **sortable**: click a column header to
 sort by it, click again to reverse; the arrow shows the direction and the
 sort runs server-side over the whole result set — not just the visible
@@ -278,6 +308,9 @@ date window, and paginates — compliance review no longer means scrolling.
 
 ## Your account (M2)
 
+![Account: profile, password, MFA, sessions, timezone.](img/account.png)
+
+
 The **Account** view (last nav item) is self-service security:
 
 - **Password** — rotate your own password (12+ characters). Other devices
@@ -293,6 +326,9 @@ The **Account** view (last nav item) is self-service security:
   rendered in your choice; per-browser, never uploaded).
 
 ## Working faster (M3)
+
+![The Ctrl-K palette — fuzzy jump to anything.](img/palette.png)
+
 
 - **Ctrl-K command palette** — jump to any view, camera, person, or recent
   event by typing part of the name. Full keyboard path: ↑↓ select, Enter
@@ -335,6 +371,9 @@ evaluators can see everything larger.
 
 ## Events, search & clips
 
+![The evidence drawer: playback, context, signed export.](img/event-drawer.png)
+
+
 - **Browse**: the dashboard's Events view (or `GET /api/events`) with
   filters (camera, identity status, time range, confidence floor). Filters
   live in the URL — copy it to hand a colleague the exact same view.
@@ -360,6 +399,9 @@ for ANPR: the encrypted plate and its anonymized hash — see
 [What is encrypted](#what-is-encrypted-and-where)).
 
 ## Alerts
+
+![Alert routes with per-channel cooldowns and test delivery.](img/alerts.png)
+
 
 Administrators (`alerts:manage`) configure routes: channel (`webhook`,
 `email`, `mqtt`, `push`), matching `rule_type` (or `*`), optional camera
@@ -391,6 +433,9 @@ The Alerts view (operators and up) has three parts:
 and reloading — the pause control tells you this rather than pretending.)*
 
 ## People & enrollment
+
+![Identities: enrolled persons, faces, erasure (GDPR).](img/people.png)
+
 
 Enrollment (biometric identity recognition) is **off by default** and should
 be enabled only with a lawful basis. When enabled:
@@ -426,6 +471,9 @@ than hiding it.
 
 ## Users & the Privacy dashboard (Wave 3)
 
+![Users & roles — RBAC with MFA reset and session revoke.](img/users.png)
+
+
 ### Users
 
 The Users view (`user:manage`, admins) lists accounts with role, MFA state,
@@ -457,6 +505,9 @@ The Privacy view is the resident-audit surface, four cards:
   — LocalVision's own servers never see it, because there are none.
 
 ## What is encrypted, and where
+
+![The audit trail: filter, sort, export — the record of everything.](img/audit.png)
+
 
 | Data | At rest | In transit to you |
 |------|---------|-------------------|
