@@ -17,12 +17,15 @@ see `AGENTS.md`; for operations (deployment, retention, troubleshooting) see
    - [Behavior rules](#behavior-rules)
    - [Per-camera retention](#per-camera-retention)
 4. [Live view](#live-view)
-5. [Events, search & clips](#events-search--clips)
-6. [Alerts](#alerts) — incl. the [Alerts screen](#the-alerts-screen-wave-3)
-7. [People & enrollment](#people--enrollment) — incl. the
-   [Identities screen](#the-identities-screen-wave-3)
-8. [Users & the Privacy dashboard (Wave 3)](#users--the-privacy-dashboard-wave-3)
-9. [What is encrypted, and where](#what-is-encrypted-and-where)
+5. [Analytics](#analytics) — incl. [natural-language search](#natural-language-search)
+6. [Keyboard shortcuts](#keyboard-shortcuts)
+7. [Density](#density)
+8. [Events, search & clips](#events-search--clips)
+9. [Alerts](#alerts) — incl. the [Alerts screen](#the-alerts-screen-wave-3)
+10. [People & enrollment](#people--enrollment) — incl. the
+    [Identities screen](#the-identities-screen-wave-3)
+11. [Users & the Privacy dashboard (Wave 3)](#users--the-privacy-dashboard-wave-3)
+12. [What is encrypted, and where](#what-is-encrypted-and-where)
 
 ---
 
@@ -218,6 +221,60 @@ when the tab is hidden:
 - **Alert feed** — the most recent analytic (non-presence) events: rule
   triggers and ANPR.
 - **Health** — per-component status with model names.
+
+## Analytics
+
+The Analytics view answers "what happened here" over archived data — one
+time-range (24h / 7d / 30d) and one camera filter shared by every widget:
+
+- **People-count trend** — an SVG line of occupancy buckets over the range.
+- **Peak occupancy** — the highest simultaneous count and when it happened.
+- **Dwell** — average time per tracked person; the card states plainly that
+  it's an average, not a distribution (the API reports one number, the UI
+  doesn't invent a histogram).
+- **Events by type** — SVG bars, one row per event type.
+- **Detection density** — a heatmap painted from tracked positions; the
+  brighter the cell, the more visits. Honest when empty: "no detections in
+  this range".
+
+### Natural-language search
+
+The search box on Analytics accepts plain-language queries — *"people at the
+dock"*, *"unknown person after 6pm"* — and ranks matching events by
+similarity with a score per result. Example chips fill the box in one click;
+your last five queries are kept for the tab (session only — the history is
+an investigation aid, not a tracking artifact).
+
+Results click through to the event drawer like any event row. The current
+ranker is the deterministic reference embedder — honest about being
+functional rather than production-accurate; a real VLM swaps in behind the
+same API without a UI change.
+
+`GET /api/analytics/search?q=…` is the API; it accepts camera and time
+filters too.
+
+## Keyboard shortcuts
+
+The console is fully operable without a mouse:
+
+| Keys | Action |
+|------|--------|
+| `g` then `o` / `l` / `e` | Overview · Live · Events |
+| `g` then `t` / `c` / `a` | Timeline · Cameras · Analytics |
+| `g` then `u` / `p` / `d` | Users · Privacy · Audit |
+| `/` | Focus the events search |
+| `↑` `↓` then `Enter` | Select an event, open it |
+| `e` | Export the open event (audited) |
+| `f` | Fullscreen wall mode (Live view) |
+| `Esc` | Close drawer / overlay / wall |
+| `?` | The shortcut overlay |
+
+## Density
+
+The **Comfortable/Compact** button in the header switches row density
+(40 px vs 32 px). The choice is per-browser (localStorage) and applies to
+every table and card — NOC operators on 24h shifts can fit more rows;
+evaluators can see everything larger.
 
 ## Events, search & clips
 
