@@ -126,11 +126,14 @@ button.danger:hover { background: rgba(248, 81, 73, 0.12); }
   border: 0;
 }
 
-/* skip-link: first tab stop */
+/* skip-link: first tab stop.
+ * Pattern: in-flow (not flung off-screen — Chromium can skip truly
+ * off-viewport elements in sequential focus navigation, which defeats
+ * the whole point), zero opacity until keyboard focus reveals it. */
 .skip-link {
   position: absolute;
   left: var(--sp-3);
-  top: calc(-1 * var(--header-h) - var(--sp-4));
+  top: var(--sp-2);
   z-index: 100;
   padding: var(--sp-3) var(--sp-4);
   background: var(--accent-strong);
@@ -140,6 +143,12 @@ button.danger:hover { background: rgba(248, 81, 73, 0.12); }
   min-height: var(--control-h);
   display: inline-flex;
   align-items: center;
-  transition: top var(--motion-fast);
+  transition: opacity var(--motion-fast);
+  /* hidden but focusable: real box, zero visual footprint */
+  opacity: 0;
+  pointer-events: none;
 }
-.skip-link:focus-visible { top: var(--sp-2); }
+.skip-link:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
