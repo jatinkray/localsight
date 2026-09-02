@@ -512,21 +512,45 @@ No other new APIs — everything else in this plan wires existing endpoints (the
 
 ---
 
-## Part V — Tooling: make the audit a permanent CI gate
+## Part V — Tooling: make the audit a permanent CI gate  ✅ SHIPPED (Wave 5)
 
-The throwaway audit becomes `tests/ui/` (Playwright + pytest):
+The throwaway audit became `tests/ui/` (Playwright + pytest) — real uvicorn
+server, seeded throwaway DB (`tests/ui/_boot.py` reuses
+`scripts/seed_dev_data.seed_demo_data()`), driven by a real browser:
 
 ```
 tests/ui/
-  conftest.py        boots the app + seeded DB (reuse scripts/seed_dev_data.py fixtures)
-  test_journeys.py   login, investigate, live, configure — per-wave expanded
-  test_a11y.py       axe-core scan per view (blocks on critical)
-  test_csp.py        assert 0 console errors per view (C-1 guard)
-  test_design.py     token assertions: contrast pairs, 44px targets, focus rings (C-3/4/5 guards)
-  test_flows.py      refresh-on-401, empty/error states, double-submit (C-6/12/13 guards)
+  conftest.py        session server (ephemeral port, env-isolated secrets/DB),
+                     page + logged_in + axe fixtures, console-error capture
+  test_journeys.py   login (honest errors, no enumeration), investigate
+                     (row→drawer→deep-link→back, keyboard path), live
+                     (honest offline tiles, layout persistence), manage
+                     (mask editor draw, g-e shortcuts, analytics search→drawer),
+                     session (logout)
+  test_a11y.py       axe-core scan per view + login (ZERO violations — the
+                     Wave-4 bar, permanent), skip-link first tab stop
+  test_csp.py        0 console errors per view under the real CSP header
+                     (C-1 guard); asserts the CSP is actually served
+  test_design.py     token contrast (all --text-* on all --surface-* ≥ 4.5:1),
+                     nav targets ≥ 44px, focus-visible ring (C-3/4/5)
+  test_flows.py      silent refresh-on-401 (C-6), dead-session exit to login,
+                     API failure → error state + working Retry (C-12),
+                     double-submit disable (C-13)
+  test_visual.py     12 key states vs committed baselines (ui_audit/baselines/,
+                     deterministic: seeded data + fixed viewport + reduced
+                     motion; MAD budget per state; UPDATE_BASELINES=1 regenerates)
+  test_perf.py       TTI < 3 s, JS payload < 300 KB, per-view latency < 2.5 s
 ```
 
-Run in CI after the normal suite; adds ~90 s. This converts every measured finding in this report into a permanent regression test — the same discipline AGENTS.md mandates for backend fixes ("the test that would have caught the bug").
+Runs in CI as the `ui-e2e` job (`pytest tests/ui -m ui`), ~100 s, and is
+merge-blocking via the quality gate. The unit job deselects the `ui`
+marker (`pytest tests/ -m "not ui"`, pytest.ini) so the fast suite stays
+fast and hermetic. This converts every measured finding in this report
+into a permanent regression test — the same discipline AGENTS.md mandates
+for backend fixes ("the test that would have caught the bug"). The gate
+proved itself during its own construction: the axe scan caught a
+`<dt>/<dd>` outside a `<dl>` in the new telemetry card before it could
+merge.
 
 ---
 

@@ -7,6 +7,8 @@
 #   4. SAST (CodeQL + Semgrep)
 #   5. Container vulnerability scan (Trivy)
 #   6. Docker build + push (on main merge)
+#   7. UI e2e (Wave 5): Playwright journeys + axe-core a11y + CSP console
+#      gate + visual regression (12 states) + perf budgets — merge-blocking
 #
 # CVE / vulnerability sources checked (all free tier):
 #   - pip-audit    → PyPI / OSV advisory database
@@ -98,7 +100,9 @@ jobs:
       - name: Run unit tests
         run: |
           rm -f test_localvision.db
-          pytest tests/ -v --tb=short --cov=packages --cov=apps --cov-report=xml --cov-fail-under=50
+          # "-m not ui": the Playwright e2e suite (tests/ui) runs in its own
+          # job with browser dependencies — keep this job fast and hermetic.
+          pytest tests/ -v --tb=short -m "not ui" --cov=packages --cov=apps --cov-report=xml --cov-fail-under=50
 
       - name: Upload coverage to Codecov
         if: github.event_name == 'pull_request'
@@ -162,8 +166,9 @@ jobs:
 
       - name: Run integration tests
         run: |
-          # Run only tests that exercise the DB layer; most tests use SQLite fixtures
-          pytest tests/ -v --tb=short -m "not unit" || true
+          # Run only tests that exercise the DB layer; most tests use SQLite fixtures.
+          # "not ui": the Playwright e2e suite is its own job (ui-e2e).
+          pytest tests/ -v --tb=short -m "not unit and not ui" || true
         continue-on-error: true
 
   # ── 3. DEPENDENCY SECURITY ────────────────────────────────────────────────
@@ -368,13 +373,52 @@ jobs:
           retention-days: 90
         continue-on-error: true
 
+  # ── 7. UI E2E (Wave 5: the audit as permanent CI gates) ─────────────────
+  # Real browser, real server: uvicorn boots the app against a seeded
+  # throwaway SQLite DB; Playwright drives it (login, investigate, live,
+  # configure, manage journeys; axe-core per view; zero console errors
+  # under the real CSP; token/design assertions; 12-state visual
+  # regression against committed baselines; perf budgets).
+  ui-e2e:
+    name: UI E2E (Playwright)
+    runs-on: ubuntu-latest
+    env:
+      # Baselines are committed; comparisons must be deterministic.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx numpy playwright pytest-playwright
+
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+
+      - name: Run UI e2e suite
+        run: pytest tests/ui -m ui -v --tb=short
+
   # ── 8. QUALITY GATE ─────────────────────────────────────────────────────
   # Aggregates all jobs and fails on lint/test failures.
   # Security scan failures are warnings (continue-on-error on those jobs).
   quality-gate:
     name: Quality Gate
     runs-on: ubuntu-latest
-    needs: [lint, test, integration, security-deps, sast-codeql, sast-semgrep, container-scan]
+    needs: [lint, test, integration, security-deps, sast-codeql, sast-semgrep, container-scan, ui-e2e]
     if: always()
 
     steps:
@@ -387,6 +431,7 @@ jobs:
           CODEQL_RESULT: ${{ needs.sast-codeql.result }}
           SEMGREP_RESULT: ${{ needs.sast-semgrep.result }}
           CONTAINER_RESULT: ${{ needs.container-scan.result }}
+          UI_E2E_RESULT: ${{ needs.ui-e2e.result }}
         run: |
           echo "=== Quality Gate Summary ==="
           echo "lint:           ${LINT_RESULT}"
@@ -396,6 +441,7 @@ jobs:
           echo "sast-codeql:    ${CODEQL_RESULT}"
           echo "sast-semgrep:   ${SEMGREP_RESULT}"
           echo "container-scan: ${CONTAINER_RESULT}"
+          echo "ui-e2e:         ${UI_E2E_RESULT}"
 
           if [ "${LINT_RESULT}" = "failure" ]; then
             echo "::error::Lint failed — fix issues before merging"
@@ -407,6 +453,10 @@ jobs:
           fi
           if [ "${INTEG_RESULT}" = "failure" ]; then
             echo "::error::Integration tests failed — review test results"
+            exit 1
+          fi
+          if [ "${UI_E2E_RESULT}" = "failure" ]; then
+            echo "::error::UI e2e suite failed — the design gates (a11y/CSP/visual/perf) are merge-blocking; see the ui-e2e job log"
             exit 1
           fi
 

@@ -28,7 +28,7 @@ ui/              vanilla-JS dashboard (served at /)
 infrastructure/  Dockerfile, compose stack, nginx, monitoring
 docs/            architecture, security, operations, integrations, api, reviews
 scripts/         gen_env.py, capacity.py, seed_dev_data.py, ui_audit*.py (Playwright)
-tests/           unit + security + API + integration
+tests/           unit + security + API + integration; tests/ui = Playwright e2e
 ```
 
 ## Architectural rules (do not break)
@@ -97,7 +97,11 @@ tests/           unit + security + API + integration
 
 - **Dev**: SQLite, tests run against an in-memory-ish session-scoped app
   (`conftest.py`); `.venv` at repo root; `pytest tests/ -q` must pass
-  (currently 77 tests).
+  (currently 90 tests). The UI e2e suite is separate: `pytest tests/ui -m ui`
+  boots a real uvicorn server + seeded throwaway DB and drives it with
+  Playwright (needs `playwright`, `pytest-playwright`, chromium, ffmpeg);
+  `pytest tests/` never collects it (deselected via the `ui` marker,
+  pytest.ini).
 - **Dev-parity FK enforcement**: `bootstrap.build` enables
   `PRAGMA foreign_keys=ON` on SQLite so cascade/integrity behavior matches
   PostgreSQL. Never remove this — it's what keeps dev bugs from hiding until
@@ -130,13 +134,17 @@ tests/           unit + security + API + integration
 
 ## Quality gates
 
-- `pytest tests/ -q` — all green (77+).
+- `pytest tests/ -q` — all green (90+).
+- `pytest tests/ui -m ui` — the browser suite (Wave 5); run it before
+  merging UI changes (needs chromium via `playwright install`, ffmpeg).
 - `ruff check .` — `ruff.toml` defines the rule set; keep changed files clean,
   don't mass-reformat untouched files.
 - `mypy packages apps --ignore-missing-imports` — keep new code typed
   (`Mapped[]`, `| None` unions).
 - CI (`.github/workflows/ci.yml`): lint, unit, PostgreSQL integration, dep
-  audits, CodeQL + Semgrep SAST, Trivy container scan.
+  audits, CodeQL + Semgrep SAST, Trivy container scan, and the
+  merge-blocking `ui-e2e` job (journeys, a11y/axe, CSP console gate,
+  visual regression, perf budgets).
 
 ## Workflow for any change
 
@@ -176,8 +184,19 @@ alerts admin, users, privacy dashboard), and 4 (Analytics & polish:
 analytics view with CSP-safe SVG/canvas charts, natural-language search,
 keyboard map with `?` overlay, density toggle, WCAG 2.1 AA conformance —
 axe-core scans EVERY view, including login, ZERO violations required)
-are DONE. Wave 5 (hardening: E2E in CI, visual regression, perf budget)
-remains. Each wave ships its own Playwright probe:
+and 5 (hardening: the audit as permanent CI gates) are DONE — the redesign
+is complete. Wave 5 converted the audit into `tests/ui/` (real-browser
+pytest suite: journeys, per-view axe-core scans, zero-console-errors
+under the live CSP, token/design assertions, refresh-on-401/empty/
+error/double-submit flows, 12-state visual regression against committed
+baselines in `ui_audit/baselines/` with `UPDATE_BASELINES=1` to
+regenerate, and perf budgets — TTI < 3s, JS < 300KB, view latency
+< 2.5s). CI's `ui-e2e` job runs it on every PR and it is merge-blocking
+via the quality gate. The suite caught its first defect during its own
+build (a `<dt>/<dd>` outside a `<dl>`) — the gate works. Opt-in UI
+marks: `ui/core/telemetry.js` (local ring buffer, default OFF, Privacy
+view toggle, JSON download — nothing leaves the browser tab).
+Each wave ALSO ships its own Playwright probe:
 `scripts/ui_probe_flows.py` (W0), `ui_probe_wave1.py`, `ui_probe_wave2.py`,
 `ui_probe_wave3.py`, `ui_probe_wave4.py` — run the matching probe for any
 view you touch; they are self-provisioning (create their own throwaway

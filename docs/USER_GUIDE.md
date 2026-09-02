@@ -27,6 +27,9 @@ see `AGENTS.md`; for operations (deployment, retention, troubleshooting) see
 11. [Users & the Privacy dashboard (Wave 3)](#users--the-privacy-dashboard-wave-3)
 12. [What is encrypted, and where](#what-is-encrypted-and-where)
 
+*(Wave 5 note: the Privacy view also carries the opt-in UI-marks card
+described above.)*
+
 ---
 
 ## Logging in
@@ -392,6 +395,12 @@ The Privacy view is the resident-audit surface, four cards:
   scolding).
 - **Data-subject erasure** — search a person by label, then typed-confirm
   erasure (same cascade as the Identities screen).
+- **UI marks (opt-in)** — off by default. When you turn it on, the
+  dashboard keeps a short local list of marks in that browser tab (view
+  loads and their timing, slow views, page errors) to help you spot a
+  problem on YOUR console. It is stored in memory only, never written to
+  disk, never sent anywhere, and **Download JSON** hands the file to you
+  — LocalVision's own servers never see it, because there are none.
 
 ## What is encrypted, and where
 
