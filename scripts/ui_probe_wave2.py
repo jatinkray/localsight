@@ -67,15 +67,25 @@ def main() -> int:
         ctx = browser.new_context(viewport={"width": 1440, "height": 900})
         page = ctx.new_page()
         page.on("pageerror", lambda e: console_errors.append(str(e)[:200]))
-        # NOTE: resource-level 503 console lines are filtered above — the
-        # live backend 503s without ffmpeg (documented dev state) and the
-        # probe asserts the UI SURFACES that state, which it does.
-        page.on("console", lambda m: console_errors.append(m.text[:200])
-                if m.type == "error" and "503" not in m.text else None)
+        # NOTE: "Failed to load resource" console lines carry no URL — the
+        # authoritative record is the RESPONSE stream. Documented live
+        # resource states (no ffmpeg in dev): 503 on /api/live/* (no
+        # transcoder / unreachable camera), 400 on /api/live/* (SSRF guard),
+        # 404 on /live-media/* (hls.js probing the manifest of a transcode
+        # that never started — the tile already shows the honest state).
+        # _on_resp drops those; console resource lines are skipped entirely
+        # (pageerror above still catches genuine uncaught JS).
+        def _documented(status: int, url: str) -> bool:
+            return (
+                (status == 503 and "/api/live/" in url)
+                or (status == 400 and "/api/live/" in url)
+                or (status == 404 and "/live-media/" in url)
+            )
+
         def _on_resp(r):
-            if r.status >= 400:
+            if r.status >= 400 and not _documented(r.status, r.url):
                 resource_errors.append(
-                    (r.status, r.url.split("8781")[-1][:40]))
+                    (r.status, r.url.split("8779")[-1][:60]))
         page.on("response", _on_resp)
 
         page.goto(BASE)

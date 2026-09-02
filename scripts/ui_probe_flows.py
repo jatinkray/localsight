@@ -123,11 +123,16 @@ with sync_playwright() as p:
     page.unroute("**/api/cameras")
 
     # ── 4. XSS neutralized (C-2): payload renders as inert text ───────
+    # (Wave 3 moved enrollment behind the "+ Enroll person" button + a
+    # detail-style form; the XSS property under test is unchanged.)
     page.click('nav button[data-view="people"]')
     page.wait_for_timeout(600)
-    page.fill("#person-label", "xss-probe-img")
-    page.fill("#person-name", "<img src=x onerror=alert(1)> <b>bold</b>")
-    page.click("#person-form button[type=submit]")
+    page.click("#person-add")
+    page.wait_for_selector("[data-form='person-new']")
+    page.locator("[data-form='person-new'] [data-field='label']").fill("xss-probe-img")
+    page.locator("[data-form='person-new'] [data-field='name']").fill(
+        "<img src=x onerror=alert(1)> <b>bold</b>")
+    page.locator("[data-form='person-new'] [data-act='person-create']").click()
     page.wait_for_timeout(1000)
     res["xss_img_injected"] = page.locator("#people-list img").count()   # 0 = safe
     res["xss_bold_rendered"] = page.locator("#people-list b").count()    # 0 = safe
@@ -136,13 +141,28 @@ with sync_playwright() as p:
     page.screenshot(path=str(OUT / "wave0-xss-neutralized.png"))
 
     # ── 5. double-submit guard (C-13) ─────────────────────────────────
-    page.fill("#person-label", "dbl-submit-test")
-    page.fill("#person-name", "Double")
-    btn = page.locator("#person-form button[type=submit]")
-    page.click("#person-form button[type=submit]")
-    res["submit_disabled_immediately_after_click"] = btn.is_disabled()
+    page.click("#person-add")
+    page.wait_for_selector("[data-form='person-new']")
+    page.locator("[data-form='person-new'] [data-field='label']").fill("dbl-submit-test")
+    page.locator("[data-form='person-new'] [data-field='name']").fill("Double")
+    # The submit handler disables the button synchronously, then the async
+    # POST + navigate unmounts the form on success. is_disabled() would race
+    # the unmount — evaluate the DOM property in the same tick as the click.
+    res["submit_disabled_immediately_after_click"] = page.evaluate("""
+      () => {
+        const form = document.querySelector("[data-form='person-new']");
+        const b = form && form.querySelector("[data-act='person-create']");
+        if (!b) return false;
+        b.click();
+        return b.disabled;  // synchronous read right after the click
+      }""")
     page.wait_for_timeout(800)
-    res["submit_reenabled_after_completion"] = not btn.is_disabled()
+    res["submit_reenabled_after_completion"] = page.evaluate("""
+      () => {
+        const form = document.querySelector("[data-form='person-new']");
+        const b = form && form.querySelector("[data-act='person-create']");
+        return b ? !b.disabled : true;  // unmounted = flow completed
+      }""")
 
     # ── 6. autocomplete attrs preserved (regression guard) ────────────
     page.click("#logout")
