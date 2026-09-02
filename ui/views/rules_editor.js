@@ -83,9 +83,17 @@ export function rulesEditor(body, cam) {
   // <img> loads can't carry the bearer token; mint the signed snapshot
   // URL ONCE (fetching inside drawShapes would re-render in a loop).
   let snapshotSrc = "";
+  let snapshotFailed = false; // set once, never re-announced (the img
+  // element is recreated on every drawShapes, so its onError would fire
+  // again and duplicate the notice for every point placed)
+  const markSnapshotFailed = () => {
+    if (snapshotFailed) return;
+    snapshotFailed = true;
+    statusEl.textContent += " (Snapshot unavailable — drawing still works on the plain canvas.)";
+  };
   api(`/api/cameras/${cam.id}/snapshot-url`)
     .then((r) => { snapshotSrc = r.url; drawShapes(); })
-    .catch(() => { /* drawing works without a frame */ });
+    .catch(markSnapshotFailed);
 
   function drawShapes() {
     const shapes = [];
@@ -121,18 +129,28 @@ export function rulesEditor(body, cam) {
         }
       }
     }
-    render(stage, [
-      h("img", {
+    // The snapshot <img> is created once and kept: re-rendering it per
+    // redraw makes the browser re-request the (expiring) signed URL and
+    // re-fires onError — the message appended once per placed point.
+    let img = stage.querySelector("img.mask-snapshot");
+    if (!img && snapshotSrc) {
+      img = h("img", {
         src: snapshotSrc,
         alt: `Snapshot from ${cam.name}`, class: "mask-snapshot",
-        onError: (e) => { e.currentTarget.classList.add("hidden");
-          statusEl.textContent += " (Snapshot unavailable — drawing still works on the plain canvas.)"; },
-      }),
-      svgEl("svg", {
-        viewBox: `0 0 ${SVG_W} ${SVG_H}`, class: "mask-overlay",
-        "data-role": "rules-overlay", preserveAspectRatio: "none",
-      }, ...shapes),
-    ]);
+        onError: (e) => { e.currentTarget.classList.add("hidden"); markSnapshotFailed(); },
+      });
+      stage.append(img);
+    }
+    const overlay = stage.querySelector("[data-role='rules-overlay']")
+      || (() => {
+        const sv = svgEl("svg", {
+          viewBox: `0 0 ${SVG_W} ${SVG_H}`, class: "mask-overlay",
+          "data-role": "rules-overlay", preserveAspectRatio: "none",
+        });
+        stage.append(sv);
+        return sv;
+      })();
+    render(overlay, ...shapes);
   }
 
   // ── rule rows ──────────────────────────────────────────────────────

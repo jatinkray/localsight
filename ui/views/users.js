@@ -9,6 +9,7 @@ import { h, render } from "../core/dom.js";
 import { api, can, getMe } from "../core/api.js";
 import { skeletonRows, emptyState, errorState } from "../core/states.js";
 import { toast } from "../core/toast.js";
+import { navigate } from "../core/router.js";
 
 const ROLES = [
   { id: "ADMIN", blurb: "everything, including user management and system config" },
@@ -67,7 +68,10 @@ async function listUsers(listEl) {
               u.mfa_enabled ? "MFA on" : "MFA off")),
             h("td", {}, h("span", { class: `pill ${u.is_active ? "ok" : "warn"}` },
               u.is_active ? "active" : "disabled")),
-            h("td", {}, u.id === me?.id ? null : deleteBtn(u, listEl)),
+            h("td", {}, h("span", { class: "row-actions" },
+              u.mfa_enabled && u.id !== me?.id ? mfaResetBtn(u, listEl) : null,
+              u.id !== me?.id ? revokeSessionsBtn(u) : null,
+              u.id === me?.id ? null : deleteBtn(u, listEl))),
           )),
         ))));
   }
@@ -88,6 +92,79 @@ async function listUsers(listEl) {
   }, "Add your first user");
   wrapper.prepend(head);
   return wrapper;
+}
+
+/** M2/E-5: admin-initiated MFA reset — typed-confirm (the app's
+ *  destructive-action discipline; a security event deserves it too). */
+function mfaResetBtn(u) {
+  return h("button", {
+    class: "ghost", "data-act": "mfa-reset", title: "Reset this user's MFA (they re-enroll)",
+    onClick: (e) => {
+      const td = e.currentTarget.closest("td");
+      const input = h("input", {
+        "data-field": "confirm-mfa", class: "mono", autocomplete: "off",
+        placeholder: `type ${u.email}`, "aria-label": "Confirm MFA reset by typing the email",
+      });
+      const go = h("button", {
+        class: "ghost", "data-act": "mfa-reset-confirm", disabled: true,
+        onClick: async () => {
+          go.disabled = true;
+          try {
+            await api(`/api/users/${u.id}/mfa-reset`, { method: "POST" });
+            toast(`MFA reset for ${u.email} — they can re-enroll from Account`, { tone: "ok" });
+            navigate("users"); // reload the list (fresh MFA pill)
+          } catch (err) {
+            toast(err.status === 400 ? "MFA isn't enabled for that user"
+              : "Reset failed — try again", { tone: "error" });
+            go.disabled = false;
+          }
+        },
+      }, "Confirm reset");
+      input.addEventListener("input", () => {
+        go.disabled = input.value.trim() !== u.email;
+      });
+      render(td, h("span", { class: "confirm-zone" },
+        h("span", { class: "muted text-xs" },
+          "Resetting MFA signs the user out of MFA protection until they re-enroll."),
+        input, go));
+      input.focus();
+    },
+  }, "Reset MFA");
+}
+
+/** M2/E-13: revoke every session of one user — same typed confirm. */
+function revokeSessionsBtn(u) {
+  return h("button", {
+    class: "ghost", "data-act": "sessions-revoke", title: "Sign out all of this user's devices",
+    onClick: (e) => {
+      const td = e.currentTarget.closest("td");
+      const input = h("input", {
+        "data-field": "confirm-sessions", class: "mono", autocomplete: "off",
+        placeholder: `type ${u.email}`, "aria-label": "Confirm by typing the email",
+      });
+      const go = h("button", {
+        class: "ghost", "data-act": "sessions-revoke-confirm", disabled: true,
+        onClick: async () => {
+          go.disabled = true;
+          try {
+            const res = await api(`/api/users/${u.id}/sessions/revoke-all`, { method: "POST" });
+            toast(`Revoked ${res.revoked} session(s) for ${u.email}`, { tone: "ok" });
+          } catch {
+            toast("Revoke failed — try again", { tone: "error" });
+            go.disabled = false;
+          }
+        },
+      }, "Sign out everywhere");
+      input.addEventListener("input", () => {
+        go.disabled = input.value.trim() !== u.email;
+      });
+      render(td, h("span", { class: "confirm-zone" },
+        h("span", { class: "muted text-xs" },
+          "Every device where this user is signed in gets revoked."),
+        input, go));
+      input.focus();
+    },
+  }, "Sign out all");
 }
 
 function deleteBtn(u, listEl) {

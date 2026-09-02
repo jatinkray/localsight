@@ -17,6 +17,7 @@ from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from packages.domain.models import AlertRoute, Event, User
+from packages.domain.timeutil import iso
 from packages.notify import Alert, MqttNotifier, PushNotifier, WebhookNotifier
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
@@ -39,7 +40,7 @@ def list_routes(db: Session = Depends(get_db)):
     return [
         {"id": r.id, "rule_type": r.rule_type, "camera_id": r.camera_id,
          "channel": r.channel, "enabled": r.enabled, "cooldown_sec": r.cooldown_sec,
-         "created_at": r.created_at.isoformat()}
+         "created_at": iso(r.created_at)}
         for r in rows
     ]
 
@@ -114,7 +115,7 @@ def test_alert(db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)
             continue
     alert = Alert(rule_id="test", rule_type="test", camera_id="", severity="info",
                   title="LocalVision test alert", message="This is a connectivity test.",
-                  ts=dt.datetime.now(dt.timezone.utc).isoformat())
+                  ts=dt.datetime.now(dt.timezone.utc))
     delivered = 0
     for ntf in notifiers:
         try:
@@ -136,7 +137,7 @@ def analytic_events(db: Session = Depends(get_db),
     rows = q.all()
     return [
         {"id": e.id, "camera_id": e.camera_id, "event_type": e.event_type,
-         "identity_status": e.identity_status, "timestamp_start": e.timestamp_start.isoformat(),
+         "identity_status": e.identity_status, "timestamp_start": iso(e.timestamp_start),
          "detail": e.detail}
         for e in rows
     ]

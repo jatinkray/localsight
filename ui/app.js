@@ -16,13 +16,15 @@ import { loadEvents, wireEventsView } from "./views/events.js";
 import { loadTimeline } from "./views/timeline.js";
 import { loadLive, wireLiveView } from "./views/live.js";
 import { loadPeople } from "./views/people.js";
-import { loadAudit } from "./views/audit.js";
+import { loadAudit, wireAuditView } from "./views/audit.js";
+import { loadAccount } from "./views/account.js";
 import { loadAlertsAdmin } from "./views/alerts_admin.js";
 import { loadUsers } from "./views/users.js";
 import { loadPrivacy } from "./views/privacy.js";
 import { loadAnalytics, wireAnalytics } from "./views/analytics.js";
 import { wireShortcuts } from "./core/shortcuts.js";
 import { wireDensity, restoreDensity } from "./core/density.js";
+import { wirePalette } from "./core/palette.js";
 import { wireTelemetry, markView } from "./core/telemetry.js";
 
 function showPanels(view) {
@@ -104,9 +106,14 @@ onView("analytics", (params) => {
   showPanels("analytics");
   loadAnalytics($("#analytics-list"), params);
 });
-onView("audit", () => {
+onView("account", () => {
+  showPanels("account");
+  loadAccount($("#account-list"));
+});
+
+onView("audit", (params) => {
   showPanels("audit");
-  loadAudit($("#audit-list"));
+  loadAudit($("#audit-list"), { params });
 });
 
 function enterApp() {
@@ -166,6 +173,7 @@ async function boot() {
   wireTelemetry(); // opt-in local marks — a no-op until enabled in Privacy
   restoreDensity();
   wireDensity($("#density-toggle"));
+  wirePalette(); // Ctrl-K command palette (M3/E-12)
 
   $("#add-camera").addEventListener("click", () => navigate("cameras", { id: "new" }));
   $("#person-add").addEventListener("click", () => navigate("people", { new: "1" }));
@@ -191,7 +199,7 @@ async function boot() {
       camera: $("#tl-camera").value.trim() || undefined,
     });
   });
-  $("#audit-load").addEventListener("click", () => navigate("audit"));
+  wireAuditView($("#audit-list"));
 
   onAuthEvent((ev) => {
     if (ev.type === "auth:expired") leaveApp({ notice: "Session expired — please sign in again." });

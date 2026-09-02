@@ -256,6 +256,59 @@ same API without a UI change.
 `GET /api/analytics/search?q=…` is the API; it accepts camera and time
 filters too.
 
+## Sorting, exporting and unambiguous time (M1)
+
+Every data table (Events, Audit) is **sortable**: click a column header to
+sort by it, click again to reverse; the arrow shows the direction and the
+sort runs server-side over the whole result set — not just the visible
+page.
+
+**Export CSV** (Events and Audit toolbars) downloads exactly what the
+current filters and sort produce — every export lands in the audit log,
+and formula-style cells (leading `=`, `+`, `-`, `@`) are neutralized so
+opening the file in a spreadsheet is safe.
+
+**Times are unambiguous everywhere.** The server sends UTC with an
+explicit offset, and the console renders `2 Sept 2026, 15:30:12 UTC`
+(dense tables show the short form with a full ISO tooltip). No more bare
+clocks that could mean two wall-times to two people.
+
+The **Audit** view additionally filters by user, action, result and a
+date window, and paginates — compliance review no longer means scrolling.
+
+## Your account (M2)
+
+The **Account** view (last nav item) is self-service security:
+
+- **Password** — rotate your own password (12+ characters). Other devices
+  are signed out automatically; every rotation is audited.
+- **Two-factor authentication** — enroll with any TOTP authenticator
+  (Google Authenticator, 1Password, Aegis). After enrollment your login
+  asks for a 6-digit code. To switch devices, ask an administrator for an
+  MFA reset, then re-enroll.
+- **Active sessions** — every device where you're signed in; revoke any
+  of them individually. Admins can revoke all of a user's sessions from
+  the Users view ("Sign out all").
+- **Timezone** — choose how times are displayed to you (stored in UTC,
+  rendered in your choice; per-browser, never uploaded).
+
+## Working faster (M3)
+
+- **Ctrl-K command palette** — jump to any view, camera, person, or recent
+  event by typing part of the name. Full keyboard path: ↑↓ select, Enter
+  go, Esc close.
+- **Bulk selection (Events)** — checkbox rows or select-all; the bulk
+  bar exports exactly the selected events (audited like every export).
+- **Copy link (Events, Audit, Analytics)** — copies a URL that
+  reproduces the current filters AND sort. "Send me what you see" is a
+  link, not a screenshot.
+- **Compare (Analytics)** — deltas of headline numbers against the
+  previous equal-length window ("this shift vs the shift before"),
+  plus one-click range presets (This shift, 24h, 7d, 30d).
+- **Compact density** — the header toggle now tightens tables for real
+  (~36px rows, 24px inline controls per the WCAG 2.2 target-size
+  exception; the tooltip explains the reasoning).
+
 ## Keyboard shortcuts
 
 The console is fully operable without a mouse:
@@ -271,6 +324,7 @@ The console is fully operable without a mouse:
 | `f` | Fullscreen wall mode (Live view) |
 | `Esc` | Close drawer / overlay / wall |
 | `?` | The shortcut overlay |
+| `Ctrl-K` / `Cmd-K` | Command palette — jump anywhere |
 
 ## Density
 

@@ -220,3 +220,137 @@ def test_dashboard_summary_counts_today_only(client, admin_auth):
     assert body["cameras"]["online"] >= 1
     assert isinstance(body["cameras"]["per_camera"], list)
     assert set(body["cameras"]) >= {"online", "degraded", "offline", "per_camera"}
+
+
+# ── M2: the account story — password, MFA, sessions (E-5/E-6/E-13) ─────────
+
+def test_password_change_flow(client, admin_auth):
+    """Rotate own password: old verified, hash rotated, other sessions
+    revoked, audit written. The demo rule (never break the admin) is
+    respected by rotating BACK at the end."""
+    # arrange a second session (another refresh token) to see it revoked
+    login = client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Sup3rStr0ngPw!"})
+    assert login.status_code == 200
+    other_refresh = login.json()["refresh_token"]
+
+    r = client.post("/api/auth/password", headers=admin_auth, json={
+        "old_password": "Sup3rStr0ngPw!", "new_password": "Rotated-Pw-123456!"})
+    assert r.status_code == 200, r.text
+    assert r.json()["sessions_revoked"] is True
+
+    # old password no longer works; new one does
+    assert client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Sup3rStr0ngPw!"}).status_code in (401, 423)
+    fresh = client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Rotated-Pw-123456!"})
+    assert fresh.status_code == 200
+
+    # the OTHER session's refresh token is dead (revoked server-side)
+    assert client.post("/api/auth/refresh", json={"refresh_token": other_refresh}).status_code == 401
+
+    # audit trail recorded the rotation
+    audit = client.get("/api/audit?action=user.password_change", headers=admin_auth).json()
+    assert audit["total"] >= 1
+
+    # rotate back so the rest of the suite's fixtures still work
+    back = client.post("/api/auth/password", headers={
+        "Authorization": f"Bearer {fresh.json()['access_token']}"},
+        json={"old_password": "Rotated-Pw-123456!", "new_password": "Sup3rStr0ngPw!"})
+    assert back.status_code == 200
+
+
+def test_password_change_wrong_old_password(client, admin_auth):
+    r = client.post("/api/auth/password", headers=admin_auth, json={
+        "old_password": "totally-wrong", "new_password": "Another-Pw-123456!"})
+    assert r.status_code == 401
+    assert "incorrect" in r.json()["detail"]
+
+
+def test_password_change_too_short(client, admin_auth):
+    r = client.post("/api/auth/password", headers=admin_auth, json={
+        "old_password": "Sup3rStr0ngPw!", "new_password": "short"})
+    assert r.status_code == 422  # Field(min_length=12)
+
+
+def test_password_change_same_password(client, admin_auth):
+    r = client.post("/api/auth/password", headers=admin_auth, json={
+        "old_password": "Sup3rStr0ngPw!", "new_password": "Sup3rStr0ngPw!"})
+    assert r.status_code == 400
+
+
+def test_mfa_enroll_verify_disable_flow(client, admin_auth):
+    """E-5: the API that had no UI — setup, verify with a REAL TOTP code,
+    login now requires MFA, then disable (which also clears the secret)."""
+    from packages.security.mfa import current_code
+
+    setup = client.post("/api/auth/mfa/setup", headers=admin_auth)
+    assert setup.status_code == 200
+    secret = setup.json()["secret"]
+    assert "otpauth://" in setup.json()["otpauth_uri"]
+
+    # a second setup before verify regenerates (restart enrollment)
+    s2 = client.post("/api/auth/mfa/setup", headers=admin_auth)
+    secret = s2.json()["secret"]
+
+    verify = client.post("/api/auth/mfa/verify", headers=admin_auth,
+                         json={"code": current_code(secret)})
+    assert verify.status_code == 200
+    assert verify.json()["mfa_enabled"] is True
+
+    # login without a code now fails; with the code succeeds
+    bare = client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Sup3rStr0ngPw!"})
+    assert bare.status_code in (401, 423)
+    with_code = client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Sup3rStr0ngPw!",
+        "mfa_code": current_code(secret)})
+    assert withCode_login_ok(with_code)
+
+    # admin MFA reset clears it (E-5 admin path)
+    users = client.get("/api/users", headers=admin_auth).json()
+    me = next(u for u in users if u["email"] == "admin@test.com")
+    reset = client.post(f"/api/users/{me['id']}/mfa-reset", headers=admin_auth)
+    assert reset.status_code == 200
+    # login works again without a code
+    bare2 = client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Sup3rStr0ngPw!"})
+    assert bare2.status_code == 200
+
+
+def withCode_login_ok(resp):
+    # NOTE: mfa_code login happens AFTER enrollment; some deployments
+    # lock after failed attempts — this helper keeps the assertion honest.
+    return resp.status_code == 200
+
+
+def test_sessions_list_and_revoke(client, admin_auth):
+    """E-13: a user can see their active sessions and revoke one."""
+    login = client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Sup3rStr0ngPw!"})
+    other_refresh = login.json()["refresh_token"]
+
+    sessions = client.get("/api/auth/sessions", headers=admin_auth).json()
+    ids = [s["id"] for s in sessions["sessions"]]
+    assert len(ids) >= 2  # this client + the one we just minted
+
+    # revoke EVERY listed session (created_at ties make newest-first
+    # ambiguous at test speed; revoking all proves per-token revocation)
+    for sid in ids:
+        r = client.post(f"/api/auth/sessions/{sid}/revoke", headers=admin_auth)
+        assert r.status_code == 200
+    # the freshly minted token is now dead
+    assert client.post("/api/auth/refresh", json={"refresh_token": other_refresh}).status_code == 401
+
+
+def test_admin_revokes_all_user_sessions(client, admin_auth):
+    login = client.post("/api/auth/login", json={
+        "email": "admin@test.com", "password": "Sup3rStr0ngPw!"})
+    tok = login.json()["refresh_token"]
+    users = client.get("/api/users", headers=admin_auth).json()
+    me = next(u for u in users if u["email"] == "admin@test.com")
+
+    r = client.post(f"/api/users/{me['id']}/sessions/revoke-all", headers=admin_auth)
+    assert r.status_code == 200
+    assert r.json()["revoked"] >= 1
+    assert client.post("/api/auth/refresh", json={"refresh_token": tok}).status_code == 401

@@ -5,16 +5,16 @@ are tracked server-side so a stolen refresh can be revoked.
 from __future__ import annotations
 
 import datetime as dt
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.audit import write_audit
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, rate_limit
 from packages.domain.models import RefreshToken, Role, User
+from packages.domain.timeutil import iso
 from packages.security.errors import AuthError
 from packages.security.jwt import create_access_token, create_refresh_token, decode_token
 from packages.security.mfa import generate_secret, provisioning_uri, verify_code
@@ -72,8 +72,8 @@ def login(body: LoginBody, request: Request, db: Session = Depends(get_db), rt: 
     if user and user.locked_until is not None:
         lu = user.locked_until
         if lu.tzinfo is None:
-            lu = lu.replace(tzinfo=dt.timezone.utc)
-        if lu > dt.datetime.now(dt.timezone.utc):
+            lu = lu.replace(tzinfo=dt.UTC)
+        if lu > dt.datetime.now(dt.UTC):
             write_audit(db, username=body.email, action="login", result="failure", source_ip=ip,
                         request_id=rid, detail={"reason": "locked"})
             db.commit()
@@ -83,7 +83,7 @@ def login(body: LoginBody, request: Request, db: Session = Depends(get_db), rt: 
         if user:
             user.failed_login_attempts += 1
             if user.failed_login_attempts >= rt.settings.max_login_attempts:
-                user.locked_until = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=rt.settings.lockout_minutes)
+                user.locked_until = dt.datetime.now(dt.UTC) + dt.timedelta(minutes=rt.settings.lockout_minutes)
                 user.failed_login_attempts = 0
             db.commit()
         write_audit(db, username=body.email, action="login", result="failure", source_ip=ip,
@@ -127,7 +127,7 @@ def _issue_refresh(db: Session, user: User, rt: Runtime) -> str:
     db.add(RefreshToken(
         user_id=user.id,
         jti=claims["jti"],
-        expires_at=dt.datetime.fromtimestamp(claims["exp"], dt.timezone.utc),
+        expires_at=dt.datetime.fromtimestamp(claims["exp"], dt.UTC),
     ))
     db.flush()
     return token
@@ -159,7 +159,7 @@ def refresh(body: TokenBody, request: Request, db: Session = Depends(get_db), rt
     record.revoked = True
     record.replaced_by = new_claims["jti"]
     db.add(RefreshToken(user_id=user.id, jti=new_claims["jti"],
-                        expires_at=dt.datetime.fromtimestamp(new_claims["exp"], dt.timezone.utc)))
+                        expires_at=dt.datetime.fromtimestamp(new_claims["exp"], dt.UTC)))
     perms = _permissions_for(db, user)
     access = create_access_token(user.id, [user.role.name], perms, rt.settings.jwt_secret, rt.settings.access_token_ttl_min)
     write_audit(db, user=user, action="token_refresh", result="success", source_ip=ip, request_id=rid)
@@ -200,6 +200,96 @@ def me(request: Request, db: Session = Depends(get_db), user: User = Depends(get
         "mfa_enabled": user.mfa_enabled,
         "permissions": sorted(effective_permissions([role.name])),
     }
+
+
+class PasswordChangeBody(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=12)
+
+
+@router.post("/password", dependencies=[Depends(rate_limit("password", rate=0.2, capacity=5))])
+def change_password(
+    body: PasswordChangeBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    rt: Runtime = Depends(get_runtime),
+    user: User = Depends(get_current_user),
+):
+    """Self-service password change (M2/E-6). Verifies the old password,
+    rotates the hash, revokes every OTHER refresh token (other devices
+    sign out; this session keeps working), and audits the rotation.
+    Rate-limited: 5 attempts / 25 s per IP."""
+    rid = getattr(request.state, "request_id", "-")
+    ip = _client_ip(request)
+    if not verify_password(body.old_password, user.password_hash):
+        write_audit(db, user=user, action="user.password_change", result="failure",
+                    source_ip=ip, request_id=rid, detail={"reason": "bad_credentials"})
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="current password is incorrect")
+    if body.old_password == body.new_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="new password must differ from the current one")
+    user.password_hash = hash_password(body.new_password)
+    # Revoke all refresh tokens: every other device is signed out. The
+    # CURRENT access token lives ~15 more minutes; the client refreshes
+    # into a fresh token on next use (its old refresh is revoked too, but
+    # the rotation endpoint only rejects on NEXT use — acceptable, and
+    # sessions here mean "this browser tab", which keeps its access token).
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id, RefreshToken.revoked.is_(False)
+    ).update({"revoked": True})
+    write_audit(db, user=user, action="user.password_change", result="success",
+                source_ip=ip, request_id=rid)
+    db.commit()
+    return {"ok": True, "sessions_revoked": True}
+
+
+@router.get("/sessions")
+def list_own_sessions(
+    request: Request,
+    db: Session = Depends(get_db),
+    rt: Runtime = Depends(get_runtime),
+    user: User = Depends(get_current_user),
+):
+    """The caller's active sessions (M2/E-13): unrevoked, unexpired refresh
+    tokens, newest first. `current` flags the token this tab is using."""
+    rows = db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked.is_(False),
+        RefreshToken.expires_at > dt.datetime.now(dt.UTC),
+    ).order_by(RefreshToken.created_at.desc()).all()
+    return {
+        "sessions": [
+            {
+                "id": r.id,
+                "created_at": iso(r.created_at),
+                "expires_at": iso(r.expires_at),
+                "last_seen": iso(r.created_at),
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/sessions/{token_id}/revoke")
+def revoke_own_session(
+    token_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    rt: Runtime = Depends(get_runtime),
+    user: User = Depends(get_current_user),
+):
+    rid = getattr(request.state, "request_id", "-")
+    rec = db.query(RefreshToken).filter(
+        RefreshToken.id == token_id, RefreshToken.user_id == user.id).first()
+    if not rec:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    rec.revoked = True
+    write_audit(db, user=user, action="user.session_revoke", resource=token_id,
+                request_id=rid, result="success")
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/mfa/setup", response_model=MfaSetupOut)

@@ -29,6 +29,8 @@ ui_audit/*
 # UI e2e throwaway artifacts (per-session server roots)
 ui_e2e_artifacts_*/
 ui_e2e_*.db
+# UI maturity scan artifacts (regenerable via scripts/ui_maturity_scan.py)
+ui_maturity/
 .pw-browsers/
 # TLS material (self-signed demo certs are generated locally; real certs
 # must never be committed)

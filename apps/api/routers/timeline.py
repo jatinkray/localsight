@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_db, get_runtime, require_permission
 from packages.domain.models import Event, Person, VideoSegment
+from packages.domain.timeutil import iso
 
 router = APIRouter(prefix="/api/timeline", tags=["timeline"])
 
@@ -48,8 +49,8 @@ def timeline(
         label = persons.get(ev.identity_id, ev.identity_status)
         key = f"{ev.camera_id}|{label}"
         out.setdefault(key, []).append({
-            "start": ev.timestamp_start.isoformat(),
-            "end": ev.timestamp_end.isoformat(),
+            "start": iso(ev.timestamp_start),
+            "end": iso(ev.timestamp_end),
             "confidence": ev.confidence,
             "identity_status": ev.identity_status,
         })
@@ -63,8 +64,8 @@ def timeline(
     recording = [
         {
             "camera_id": s.camera_id,
-            "start": s.start_ts.isoformat(),
-            "end": s.end_ts.isoformat(),
+            "start": iso(s.start_ts),
+            "end": iso(s.end_ts),
             "duration_sec": s.duration_sec,
         }
         for s in rec_rows
@@ -81,7 +82,7 @@ def timeline(
     markers = [
         {
             "id": e.id, "camera_id": e.camera_id, "event_type": e.event_type,
-            "ts": e.timestamp_start.isoformat(), "identity_status": e.identity_status,
+            "ts": iso(e.timestamp_start), "identity_status": e.identity_status,
         }
         for e in mk_rows
     ]

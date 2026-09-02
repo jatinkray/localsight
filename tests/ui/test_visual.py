@@ -39,10 +39,45 @@ STATES = {
     "users":            {"tol": 3.0},
 }
 
+# Wall-clock MASKS (Playwright screenshot masking): elements whose CONTENT
+# depends on the absolute time the shot runs — clock times, "x ago" labels,
+# hour-binned charts, "today" counters. Playwright paints them solid in
+# BOTH the baseline and the comparison shot, so layout + typography stay
+# asserted while the actual digits (which differ between the machine that
+# shot the baseline and CI) are excluded BY DESIGN. This is how the suite
+# keeps committed baselines deterministic across environments without
+# inflating budgets: the docstring's "timestamps are the one
+# nondeterminism" gets engineered out at the source instead of tolerated.
+MASKS = {
+    # overview: recent-events/alert feeds render wall-clock + relative
+    # times; the sparkline bins by wall-clock hour; "Events today" flips
+    # at midnight. All masked; everything else compares pixel-exact.
+    "overview": [
+        ".recent-time",
+        ".spark-wrap",
+        ".stat:nth-child(2) .big",
+        ".stat:nth-child(2) .stat-sub",
+    ],
+    # event-drawer + timeline render wall-clock stamps too — but they run
+    # under a throwaway DB seeded minutes before the shot, so their times
+    # are stable within a run AND across machines. They stay unmasked;
+    # only states whose content spans hour boundaries need it.
+}
+
 
 def _shoot(page, name):
     path = BASELINES / f"{name}.png"
-    page.screenshot(path=str(path), animations="disabled")
+    # Masks key on the STATE name. Comparison shots arrive here as
+    # "__current_<state>" (a name-mangled artifact path) — strip the
+    # prefix or the masks silently never apply to the comparison side,
+    # and every run "fails" against its own masked baseline.
+    state = name.removeprefix("__current_")
+    # Wall-clock content is masked OUT of the pixels (see MASKS): the mask
+    # list resolves NOW, against the live DOM, so a broken selector yields
+    # an empty mask (loudly identical pixels) — mask selectors are part of
+    # the state definition and are reviewed like baselines.
+    mask = [page.locator(sel) for sel in MASKS.get(state, [])]
+    page.screenshot(path=str(path), animations="disabled", mask=mask)
     return path
 
 
@@ -116,6 +151,13 @@ def _reach_state(page, name):
     page.click("#nav button[data-view='dashboard']")
     page.wait_for_timeout(300)
     if name == "overview":
+        # Wait for a REAL readiness signal, not a fixed sleep: the overview
+        # paints stat cards only after /api/dashboard/summary + /api/cameras
+        # resolve, and a fixed 900ms lets a slow machine (hi, CI runner)
+        # shoot half-rendered skeletons — nondeterminism that isn't time
+        # content at all. Cards present = summary painted; the recent/trend
+        # strip settles right after (small grace below).
+        page.wait_for_selector("#stat-cards .card", timeout=10_000)
         page.wait_for_timeout(900)
     elif name == "live-grid":
         page.click("#nav button[data-view='live']")

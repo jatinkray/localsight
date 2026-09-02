@@ -21,6 +21,7 @@ from apps.api.bootstrap import Runtime
 from apps.api.dependencies import get_current_user, get_db, get_runtime, require_permission
 from packages.domain.models import Camera, NvrDevice, Snapshot, VideoSegment
 from packages.domain.schemas import TPLinkNvrSeed
+from packages.domain.timeutil import iso
 from packages.security.crypto import CryptoBox
 from packages.security.errors import UnsafeUrlError
 from packages.security.ssrf import validate_egress_url
@@ -255,7 +256,7 @@ def list_cameras(db: Session = Depends(get_db)):
             "nvr_device_id": r.nvr_device_id,
             "status": r.status,
             "health": r.health,
-            "last_seen": r.last_seen.isoformat() if r.last_seen else None,
+            "last_seen": iso(r.last_seen) if r.last_seen else None,
             "resolution": r.resolution,
             "fps": r.fps,
             "timezone": r.timezone,
@@ -275,7 +276,7 @@ def get_camera(camera_id: str, db: Session = Depends(get_db)):
         "id": cam.id, "name": cam.name, "camera_uid": cam.camera_uid,
         "nvr_device_id": cam.nvr_device_id,
         "status": cam.status, "health": cam.health,
-        "last_seen": cam.last_seen.isoformat() if cam.last_seen else None,
+        "last_seen": iso(cam.last_seen) if cam.last_seen else None,
         "resolution": cam.resolution, "fps": cam.fps, "timezone": cam.timezone,
         "privacy_masks": cam.privacy_masks, "retention": cam.retention,
     }
