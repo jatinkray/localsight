@@ -105,22 +105,22 @@ export async function loadDashboard(statCards, healthEl, extra) {
 
     render(statCards, [
       h("div", { class: "card stat" },
-        h("h3", {}, "Cameras online"),
+        h("h2", { class: "an-widget-title" }, "Cameras online"),
         h("div", { class: "big" }, `${online}/${camList.length}`),
         degraded ? h("div", { class: "stat-sub" }, `${degraded} degraded`) : null,
       ),
       h("div", { class: "card stat" },
-        h("h3", {}, "Events today"),
+        h("h2", { class: "an-widget-title" }, "Events today"),
         h("div", { class: "big" }, String(evToday)),
         h("div", { class: "stat-sub" }, `${evUnknown} unknown identity`),
       ),
       h("div", { class: "card stat" },
-        h("h3", {}, "Enrolled identities"),
+        h("h2", { class: "an-widget-title" }, "Enrolled identities"),
         h("div", { class: "big" }, String(peopleList.length)),
         h("div", { class: "stat-sub" }, "reference embeddings stored"),
       ),
       h("div", { class: "card stat" },
-        h("h3", {}, "System"),
+        h("h2", { class: "an-widget-title" }, "System"),
         h("div", { class: "big" }, label(health?.status || "?").toUpperCase()),
         h("div", { class: "stat-sub" }, "database + AI model"),
       ),
@@ -166,14 +166,14 @@ export async function loadDashboard(statCards, healthEl, extra) {
       recent = evs.items || [];
     } catch { recent = []; }
     render(extra.trendEl, [
-      h("h3", {}, "Events — last 24 hours"),
+      h("h2", { class: "an-widget-title" }, "Events — last 24 hours"),
       h("div", { class: "spark-wrap" },
         sparkline(hourlyBuckets(recent)),
         h("span", { class: "muted spark-note" }, `${recent.length} events`),
       ),
     ]);
     render(extra.recentEl, [
-      h("h3", {}, "Recent events"),
+      h("h2", { class: "an-widget-title" }, "Recent events"),
       recent.length
         ? h("div", { class: "recent-list" },
             ...recent.slice(0, 5).map((e) => recentEventRow(e, nameMap)))

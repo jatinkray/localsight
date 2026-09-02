@@ -29,6 +29,7 @@ from packages.domain.models import (  # noqa: E402
     Event,
     Person,
     PersonEmbedding,
+    Track,
     VideoSegment,
 )
 from packages.domain.timeutil import utcnow  # noqa: E402
@@ -252,11 +253,42 @@ def main() -> None:
                     )
                 )
 
+        # ── tracks (last 24h, so analytics surfaces have trajectories
+        #    to draw: the occupancy trend + heatmap are Track-derived) ──
+        n_tracks = 0
+        for k in range(40):
+            cam = cameras[k % len(cameras)]
+            t0 = now - timedelta(minutes=(k * 29) % (60 * 24), seconds=60 * (k % 5))
+            dur = 30 + (k * 11) % 90
+            # a plausible walk across the frame: 6 sampled centers
+            x0, y0 = 0.15 + (k % 7) * 0.09, 0.35 + (k % 5) * 0.08
+            step = 0.07 if k % 2 else -0.05
+            traj = []
+            for j in range(6):
+                x = min(0.92, max(0.08, x0 + step * j))
+                y = min(0.9, max(0.1, y0 + 0.012 * j))
+                traj.append([round(x, 4), round(y, 4)])
+            ident = persons[k % len(persons)] if k % 3 else None
+            s.add(Track(
+                id=f"seed-track-{k:04d}",
+                camera_id=cam.id,
+                identity_id=ident.id if ident else None,
+                identity_status="known" if ident else "unknown",
+                first_seen=t0,
+                last_seen=t0 + timedelta(seconds=dur),
+                confidence=0.55 + ((k * 7) % 40) / 100,
+                bbox={"x": traj[-1][0] - 0.05, "y": traj[-1][1] - 0.1, "w": 0.1, "h": 0.2},
+                trajectory=traj,
+                created_at=t0,
+            ))
+            n_tracks += 1
+
         s.commit()
         print(
             f"Seeded: {s.query(Camera).count()} cameras, {s.query(Person).count()} persons, "
             f"{n_events} events (+{s.query(VideoSegment).count()} segments, "
-            f"{s.query(AlertRoute).count()} alert routes)."
+            f"{s.query(AlertRoute).count()} alert routes, "
+            f"{n_tracks} tracks for analytics)."
         )
     finally:
         s.close()

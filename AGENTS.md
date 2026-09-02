@@ -170,14 +170,22 @@ code looks the way it does now.
 `docs/reviews/UI_UX_AUDIT_AND_REDESIGN_PLAN.md` is the UI/UX counterpart:
 a Playwright-measured audit (findings C-1 … C-14) and the phased enterprise
 redesign. Waves 0 (trust repairs), 1 (investigation loop), 2 (Monitor:
-live grid + wall mode, auto-refreshing overview), and 3 (Manage: camera
+live grid + wall mode, auto-refreshing overview), 3 (Manage: camera
 grid + detail tabs, mask/rules editors, add-camera wizard, identities,
-alerts admin, users, privacy dashboard) are DONE. Wave 4 (analytics &
-polish) follows the same pattern. Each wave ships its own Playwright probe:
+alerts admin, users, privacy dashboard), and 4 (Analytics & polish:
+analytics view with CSP-safe SVG/canvas charts, natural-language search,
+keyboard map with `?` overlay, density toggle, WCAG 2.1 AA conformance —
+axe-core scans EVERY view, including login, ZERO violations required)
+are DONE. Wave 5 (hardening: E2E in CI, visual regression, perf budget)
+remains. Each wave ships its own Playwright probe:
 `scripts/ui_probe_flows.py` (W0), `ui_probe_wave1.py`, `ui_probe_wave2.py`,
-`ui_probe_wave3.py` — run the matching probe for any view you touch; they
-are self-provisioning (create their own throwaway users) and assert the
-audit findings stay fixed. Frontend conventions for new views live in
+`ui_probe_wave3.py`, `ui_probe_wave4.py` — run the matching probe for any
+view you touch; they are self-provisioning (create their own throwaway
+users) and assert the audit findings stay fixed. The Wave-4 probe embeds
+the axe gate: `scripts/vendor/axe.min.js` is a PROBE-ONLY asset (never
+served, never shipped — the app's one vendor dependency remains hls.js);
+keep new views clean by running the probe, not by eyeballing contrast.
+Frontend conventions for new views live in
 `ui/WAVE3_CONVENTIONS.md` (CSP-safe SVG geometry, h()/render() DOM
 construction, RBAC gating, honest empty/error states, write-only
 credentials, typed-confirm deletes). The

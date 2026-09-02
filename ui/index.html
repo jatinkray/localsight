@@ -13,10 +13,10 @@
   <a class="skip-link" href="#main">Skip to content</a>
 
   <!-- ── Sign in ─────────────────────────────────────────────────────── -->
-  <div id="login" class="login-wrap hidden">
+  <main id="login" class="login-wrap hidden">
     <form id="login-form" class="login-card" novalidate>
       <div class="login-head">
-        <div class="brand"><span class="brand-mark" aria-hidden="true">◉</span> LocalVision</div>
+        <h1 class="brand"><span class="brand-mark" aria-hidden="true">◉</span> LocalVision</h1>
         <p class="muted">Local-first video intelligence</p>
       </div>
       <div class="login-form">
@@ -36,20 +36,21 @@
         credentials never leave this host.</p>
       </div>
     </form>
-  </div>
+  </main>
 
   <!-- ── Application shell ───────────────────────────────────────────── -->
   <div id="app" class="hidden">
     <header class="app-header">
       <button id="nav-toggle" class="ghost nav-toggle" aria-label="Toggle navigation"
               aria-controls="nav" aria-expanded="false"><span aria-hidden="true">☰</span></button>
-      <div class="brand"><span class="brand-mark" aria-hidden="true">◉</span> LocalVision</div>
+      <h1 class="brand"><span class="brand-mark" aria-hidden="true">◉</span> LocalVision</h1>
       <nav id="nav" class="app-nav" aria-label="Primary">
         <button data-view="dashboard">Overview</button>
         <button data-view="live">Live</button>
         <button data-view="cameras">Cameras</button>
         <button data-view="events">Events</button>
         <button data-view="timeline">Timeline</button>
+        <button data-view="analytics">Analytics</button>
         <button data-view="people">People</button>
         <button data-view="alerts">Alerts</button>
         <button data-view="users">Users</button>
@@ -59,6 +60,7 @@
       <span class="trust-chip" title="Video, faces and credentials are encrypted on this host — nothing leaves it.">
         <span aria-hidden="true">🔒</span> Local · Encrypted
       </span>
+      <button id="density-toggle" class="ghost" aria-pressed="false"><span>Comfortable</span></button>
       <button id="logout" class="ghost">Sign out</button>
     </header>
 
@@ -135,6 +137,10 @@
           </div>
           <div id="timeline-out"></div>
         </div>
+      </section>
+
+      <section data-panel="analytics" class="panel hidden" aria-label="Analytics">
+        <div id="analytics-list"></div>
       </section>
 
       <section data-panel="people" class="panel hidden" aria-label="People">

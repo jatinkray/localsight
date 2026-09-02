@@ -21,7 +21,10 @@
   /* ── text (contrast measured on --surface-0/1) ─────────────────────── */
   --text-primary:   #e6edf3;  /* 14.9:1 on surface-0                        */
   --text-secondary: #9aa7b8;  /*  7.3:1                                     */
-  --text-tertiary:  #6e7a89;  /*  4.6:1 — smallest legal body text          */
+  --text-tertiary:  #8b98a6;  /*  5.4:1 on surface-2 (worst case). The old
+                                 #6e7a89 was 3.65:1 there — axe caught it in
+                                 the Wave-4 a11y pass; labels/hints now stay
+                                 AA-legal on every surface a card renders on. */
   --text-disabled:  #4d5766;  /*  2.9:1 — decorative only, never text        */
   /* legacy aliases (Wave-2 components.css references) — keep both spellings
      working until that section is rewritten */
