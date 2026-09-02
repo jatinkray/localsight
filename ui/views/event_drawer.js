@@ -30,10 +30,17 @@ function ensureDrawer() {
   });
   document.body.append(scrimEl, drawerEl);
 
-  // Escape closes; focus is trapped inside while open.
+  // Escape closes; focus is trapped inside while open. "E" (drawer open,
+  // not typing) triggers the audited export — the keyboard map's power path.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !drawerEl.classList.contains("hidden")) requestClose();
-    if (e.key === "Tab" && !drawerEl.classList.contains("hidden")) trapFocus(e);
+    if (drawerEl.classList.contains("hidden")) return;
+    if (e.key === "Escape") requestClose();
+    if (e.key === "Tab") trapFocus(e);
+    if ((e.key === "e" || e.key === "E")
+        && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) {
+      const btn = drawerEl.querySelector(".drawer-export");
+      if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+    }
   });
   return drawerEl;
 }
