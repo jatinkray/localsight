@@ -155,27 +155,12 @@ def admin_token(server):
                      "password": server["admin_password"]})["access_token"]
 
 
-# ── CI diagnosis: emit every failure as a workflow annotation ──────────────
-# GitHub surfaces ::error:: lines from the log on the run summary page,
-# which is readable WITHOUT log-download auth. One pytest failure = one
-# annotation naming the test + the assert, so a red ui-e2e run answers
-# "which test, what drift" from the public run page alone.
-
-def _annotation_for(report):
-    if report.when != "call" or report.passed:
-        return None
-    node = getattr(report, "nodeid", "")
-    long = getattr(report, "longrepr", None)
-    msg = str(long).replace("\n", " | ")[:350]
-    return f"::{report.outcome} file=tests/ui/{node}::LOCALSIGHT-CI {node} -> {msg}"
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_logreport(report):
-    line = _annotation_for(report)
-    if line:
-        print(line, flush=True)
-
+# ── CI failure visibility ─────────────────────────────────────────────────
+# Red ui-e2e runs used to be opaque without log-download auth (annotations
+# only ever showed the runner's exit-code line). The terminal summary is the
+# last block of the log — shown by default in the Actions UI — and the
+# ::error workflow commands surface on the public run page. One block,
+# printed once; no duplicate per-report hook.
 
 def pytest_terminal_summary(terminalreporter):
     """Print a machine- and human-readable one-block summary of every
