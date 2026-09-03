@@ -189,7 +189,11 @@ def pytest_terminal_summary(terminalreporter):
     for r in failed:
         node = getattr(r, "nodeid", "?")
         longrepr = str(getattr(r, "longrepr", "")).splitlines()
-        msg = next((ln for ln in reversed(longrepr) if ln.startswith("AssertionError") or "assert" in ln), longrepr[-1] if longrepr else "")
-        print(f"FAIL {node} :: {msg[:300]}", flush=True)
+        # take the whole assertion tail: the drift-band localization lives
+        # on the message lines AFTER the bare 'assert' line.
+        idx = next((i for i, ln in enumerate(reversed(longrepr)) if ln.startswith("AssertionError") or "assert" in ln), None)
+        tail = longrepr[-(idx + 1):] if idx is not None and idx else longrepr[-3:]
+        msg = " | ".join(x.strip() for x in tail if x.strip())[:600]
+        print(f"FAIL {node} :: {msg}", flush=True)
         print(f"::error title=ui-e2e failure::FAIL {node} :: {msg[:250]}", flush=True)
     print("==== END SUMMARY ====", flush=True)
