@@ -175,3 +175,21 @@ def pytest_runtest_logreport(report):
     line = _annotation_for(report)
     if line:
         print(line, flush=True)
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Print a machine- and human-readable one-block summary of every
+    non-passed test: name + the LAST assertion line. This lands in the
+    log tail (always visible in the Actions UI without expanding) and
+    doubles as workflow-command annotations."""
+    failed = terminalreporter.stats.get("failed", []) + terminalreporter.stats.get("error", [])
+    if not failed:
+        return
+    print("\n==== LOCALSIGHT-CI SUMMARY ====", flush=True)
+    for r in failed:
+        node = getattr(r, "nodeid", "?")
+        longrepr = str(getattr(r, "longrepr", "")).splitlines()
+        msg = next((ln for ln in reversed(longrepr) if ln.startswith("AssertionError") or "assert" in ln), longrepr[-1] if longrepr else "")
+        print(f"FAIL {node} :: {msg[:300]}", flush=True)
+        print(f"::error title=ui-e2e failure::FAIL {node} :: {msg[:250]}", flush=True)
+    print("==== END SUMMARY ====", flush=True)
