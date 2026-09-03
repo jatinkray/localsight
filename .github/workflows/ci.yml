@@ -412,6 +412,20 @@ jobs:
       - name: Run UI e2e suite
         run: pytest tests/ui -m ui -v --tb=short
 
+      # Visual-regression debugging: failing states keep their shot at
+      # ui_audit/baselines/__fail_<state>.png (see test_visual.py). Upload
+      # them (+ the committed baselines they were compared against) so a
+      # drift can be diffed offline without re-running anything.
+      - name: Store visual-regression evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-evidence
+          path: |
+            ui_audit/baselines/__fail_*.png
+            ui_audit/baselines/overview.png
+          if-no-files-found: ignore
+
   # ── 8. QUALITY GATE ─────────────────────────────────────────────────────
   # Aggregates all jobs and fails on lint/test failures.
   # Security scan failures are warnings (continue-on-error on those jobs).

@@ -153,3 +153,36 @@ def admin_token(server):
     return api_call(server["base"], "/api/auth/login", "POST",
                     {"email": "admin@test.com",
                      "password": server["admin_password"]})["access_token"]
+
+
+# ── CI failure visibility ─────────────────────────────────────────────────
+# Red ui-e2e runs used to be opaque without log-download auth (annotations
+# only ever showed the runner's exit-code line). The terminal summary is the
+# last block of the log — shown by default in the Actions UI — and the
+# ::error workflow commands surface on the public run page. One block,
+# printed once; no duplicate per-report hook.
+
+def pytest_terminal_summary(terminalreporter):
+    """Print a machine- and human-readable one-block summary of every
+    non-passed test: name + the LAST assertion line. This lands in the
+    log tail (always visible in the Actions UI without expanding) and
+    doubles as workflow-command annotations."""
+    failed = terminalreporter.stats.get("failed", []) + terminalreporter.stats.get("error", [])
+    if not failed:
+        return
+    print("\n==== LOCALSIGHT-CI SUMMARY ====", flush=True)
+    for r in failed:
+        node = getattr(r, "nodeid", "?")
+        longrepr = str(getattr(r, "longrepr", "")).splitlines()
+        # take the whole assertion tail: the drift-band localization lives
+        # on the message lines AFTER the bare 'assert' line.
+        idx = next((i for i, ln in enumerate(reversed(longrepr)) if ln.startswith("AssertionError") or "assert" in ln), None)
+        tail = longrepr[-(idx + 1):] if idx is not None and idx else longrepr[-3:]
+        msg = " | ".join(x.strip() for x in tail if x.strip())
+        print(f"FAIL {node} :: {msg[:900]}", flush=True)
+        print(f"::error title=ui-e2e failure::FAIL {node} :: {msg[:240]}", flush=True)
+        # a second annotation line for the tail (band localization) —
+        # GitHub caps a single annotation message; two carry the whole story.
+        if len(msg) > 240:
+            print(f"::error title=drift detail::{node} :: {msg[240:480]}", flush=True)
+    print("==== END SUMMARY ====", flush=True)
