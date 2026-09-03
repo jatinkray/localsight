@@ -226,7 +226,17 @@ def _reach_state(page, name):
         # content at all. Cards present = summary painted; the recent/trend
         # strip settles right after (small grace below).
         page.wait_for_selector("#stat-cards .card", timeout=10_000)
-        page.wait_for_timeout(900)
+        # The Wave-2 panels (cam strip, recent events, trend, alert feed)
+        # fetch in a SECOND round after the stat cards. Settled content =
+        # every panel holds its real rows (or its honest empty state), not
+        # a blank card still waiting on its fetch. This is what made CI
+        # drift at 3.21 over budget while fast hosts stayed at ~0: the
+        # 900ms grace caught half-loaded panels on slow runners.
+        page.wait_for_selector("#recent-events .recent-event, #recent-events .state-box", timeout=10_000)
+        page.wait_for_selector("#alerts-feed .alert-item, #alerts-feed .state-box", timeout=10_000)
+        page.wait_for_selector("#trend .spark-wrap", timeout=10_000)
+        page.wait_for_selector("#cam-strip .cam-chip, #cam-strip .state-box", timeout=10_000)
+        page.wait_for_timeout(400)
     elif name == "live-grid":
         page.click("#nav button[data-view='live']")
         page.wait_for_selector(".live-tile")
