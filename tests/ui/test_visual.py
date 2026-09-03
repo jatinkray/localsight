@@ -144,6 +144,74 @@ def _mean_abs_diff(a: Path, b: Path) -> float:
     return total / len(pa)
 
 
+def _drift_bands(a: Path, b: Path, band: int = 40, top: int = 6) -> str:
+    """Coarse localization of WHERE two shots differ: per-`band`-row mean
+    absolute difference, top offenders only. Row bands map to UI regions
+    (nav, stat cards, feed strip...), which turns 'drift 3.21 > 3.0' into
+    an actionable 'the feed strip renders differently'."""
+    import zlib
+
+    def decode(p: Path):
+        raw = p.read_bytes()
+        pos, idat, width, height, bpp = 8, b"", 0, 0, 3
+        while pos < len(raw):
+            ln = int.from_bytes(raw[pos:pos+4], "big")
+            ct = raw[pos+4:pos+8]
+            data = raw[pos+8:pos+8+ln]
+            if ct == b"IHDR":
+                width = int.from_bytes(data[0:4], "big")
+                height = int.from_bytes(data[4:8], "big")
+                bpp = {0: 1, 2: 3, 4: 2, 6: 4}.get(data[9], 3)
+            elif ct == b"IDAT":
+                idat += data
+            pos += 12 + ln
+        raw_px = zlib.decompress(idat)
+        stride = width * bpp + 1
+        px, prev = bytearray(), bytearray(width * bpp)
+        for y in range(height):
+            line = bytearray(raw_px[y*stride:(y+1)*stride])
+            filt = line[0]
+            line = line[1:]
+            if filt == 1:
+                for i in range(bpp, len(line)):
+                    line[i] = (line[i] + line[i-bpp]) & 0xFF
+            elif filt == 2:
+                for i in range(len(line)):
+                    line[i] = (line[i] + prev[i]) & 0xFF
+            elif filt == 3:
+                for i in range(len(line)):
+                    left = line[i-bpp] if i >= bpp else 0
+                    line[i] = (line[i] + ((left + prev[i]) >> 1)) & 0xFF
+            elif filt == 4:
+                for i in range(len(line)):
+                    a_ = line[i-bpp] if i >= bpp else 0
+                    b_ = prev[i]
+                    c_ = prev[i-bpp] if i >= bpp else 0
+                    pp = a_ + b_ - c_
+                    pa, pb, pc = abs(pp-a_), abs(pp-b_), abs(pp-c_)
+                    pred = a_ if pa <= pb and pa <= pc else (b_ if pb <= pc else c_)
+                    line[i] = (line[i] + pred) & 0xFF
+            px += line
+            prev = line
+        return width, height, bytes(px), bpp
+
+    wa, ha, pa, bpa = decode(a)
+    wb, hb, pb, bpb = decode(b)
+    out = []
+    n = min(ha, hb)
+    for y0 in range(0, n, band):
+        y1 = min(y0 + band, n)
+        sa = pa[y0*wa*bpa:y1*wa*bpa]
+        sb = pb[y0*wb*bpb:y1*wb*bpb]
+        if len(sa) != len(sb):
+            continue
+        m = sum(abs(x - y) for x, y in zip(sa, sb)) / len(sa)
+        if m > 1.0:
+            out.append((m, y0, y1))
+    out.sort(reverse=True)
+    return "; ".join(f"{y0}-{y1}:{m:.1f}" for m, y0, y1 in out[:top]) or "none>1.0"
+
+
 def _reach_state(page, name):
     """Navigate the app into the named state (post-login states assume
     the logged_in fixture)."""
@@ -245,7 +313,14 @@ def test_visual_state(name, spec, logged_in, server, playwright):
     shot = _shoot(target, f"__current_{name}")
     cleanup()
     diff = _mean_abs_diff(base, shot)
-    shot.unlink()  # never leave comparison artifacts behind
-    assert diff <= spec["tol"], (
-        f"{name}: visual drift {diff:.2f} > budget {spec['tol']} - if the "
-        "change is intended, regenerate with UPDATE_BASELINES=1 and commit")
+    if diff <= spec["tol"]:
+        shot.unlink()  # never leave comparison artifacts behind
+    else:
+        bands = _drift_bands(base, shot)
+        keep = BASELINES / f"__fail_{name}.png"
+        shot.replace(keep)  # uploaded as a CI artifact for offline diffing
+        assert diff <= spec["tol"], (
+            f"{name}: visual drift {diff:.2f} > budget {spec['tol']} "
+            f"- drifting row bands (y:mad): {bands} - shot kept at {keep} "
+            "- if the change is intended, regenerate with "
+            "UPDATE_BASELINES=1 and commit")
