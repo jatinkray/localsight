@@ -209,7 +209,24 @@ def _drift_bands(a: Path, b: Path, band: int = 40, top: int = 6) -> str:
         if m > 1.0:
             out.append((m, y0, y1))
     out.sort(reverse=True)
-    return "; ".join(f"{y0}-{y1}:{m:.1f}" for m, y0, y1 in out[:top]) or "none>1.0"
+    rows_s = "; ".join(f"y{y0}-{y1}:{m:.1f}" for m, y0, y1 in out[:top]) or "none>1.0"
+
+    # column bands: same idea, rotated — a left-edge or right-edge drift
+    # (scrollbar, font overhang) shows up here even when row bands look uniform.
+    colout = []
+    w = min(wa, wb)
+    for x0 in range(0, w, band):
+        x1 = min(x0 + band, w)
+        m = sum(
+            abs(pa[y * wa + x] - pb[y * wb + x])
+            for y in range(0, n, 4)  # sample every 4th row: enough signal
+            for x in range(x0, x1, 4)
+        ) / max(1, ((x1 - x0 + 3) // 4) * ((n + 3) // 4))
+        if m > 1.0:
+            colout.append((m, x0, x1))
+    colout.sort(reverse=True)
+    cols_s = "; ".join(f"x{x0}-{x1}:{m:.1f}" for m, x0, x1 in colout[:top]) or "none>1.0"
+    return f"rows[{rows_s}] cols[{cols_s}]"
 
 
 def _reach_state(page, name):
