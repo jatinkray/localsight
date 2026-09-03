@@ -193,7 +193,11 @@ def pytest_terminal_summary(terminalreporter):
         # on the message lines AFTER the bare 'assert' line.
         idx = next((i for i, ln in enumerate(reversed(longrepr)) if ln.startswith("AssertionError") or "assert" in ln), None)
         tail = longrepr[-(idx + 1):] if idx is not None and idx else longrepr[-3:]
-        msg = " | ".join(x.strip() for x in tail if x.strip())[:600]
-        print(f"FAIL {node} :: {msg}", flush=True)
-        print(f"::error title=ui-e2e failure::FAIL {node} :: {msg[:250]}", flush=True)
+        msg = " | ".join(x.strip() for x in tail if x.strip())
+        print(f"FAIL {node} :: {msg[:900]}", flush=True)
+        print(f"::error title=ui-e2e failure::FAIL {node} :: {msg[:240]}", flush=True)
+        # a second annotation line for the tail (band localization) —
+        # GitHub caps a single annotation message; two carry the whole story.
+        if len(msg) > 240:
+            print(f"::error title=drift detail::{node} :: {msg[240:480]}", flush=True)
     print("==== END SUMMARY ====", flush=True)
