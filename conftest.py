@@ -15,7 +15,7 @@ import base64
 import secrets
 
 os.environ.setdefault("APP_ENV", "test")
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_localvision.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test_localsight.db")
 os.environ.setdefault("JWT_SECRET", base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())
 os.environ.setdefault("MASTER_ENCRYPTION_KEY", base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())
 os.environ.setdefault("BOOTSTRAP_ADMIN_EMAIL", "admin@test.com")

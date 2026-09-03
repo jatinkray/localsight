@@ -1,4 +1,4 @@
-# LocalVision UI/UX Enterprise Maturity Plan
+# LocalSight UI/UX Enterprise Maturity Plan
 
 **Author:** Principal Designer / UI-UX Engineering
 **Date:** September 2026 (post-Wave 5)

@@ -1,4 +1,4 @@
-"""LocalVision API application factory.
+"""LocalSight API application factory.
 
 Builds the runtime (engine, crypto, storage, model registry) once at startup,
 wires security middleware (request IDs, CORS, hardened headers), mounts all
@@ -92,7 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Serve transcoded live HLS segments (written by the live gateway in live.py).
     # LIVE_DIR is the single shared source of truth for both the transcode root
-    # and this mount — LOCALVISION_LIVE_DIR overrides both together.
+    # and this mount — LOCALSIGHT_LIVE_DIR overrides both together.
     os.makedirs(domain_live_cfg.LIVE_DIR, exist_ok=True)
     app.mount("/live-media", StaticFiles(directory=domain_live_cfg.LIVE_DIR), name="live-media")
 
@@ -105,7 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def unhandled(request: Request, exc: Exception):
         from packages.observability.logging import logging
 
-        logging.getLogger("localvision").exception("unhandled error", extra={"request_id": getattr(request.state, "request_id", "-")})
+        logging.getLogger("localsight").exception("unhandled error", extra={"request_id": getattr(request.state, "request_id", "-")})
         return JSONResponse(status_code=500, content={"detail": "internal server error"})
 
     @app.on_event("shutdown")

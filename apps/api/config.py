@@ -13,10 +13,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
     app_env: str = "development"
-    app_name: str = "LocalVision"
+    app_name: str = "LocalSight"
     log_level: str = "INFO"
 
-    database_url: str = "sqlite:///./localvision.db"
+    database_url: str = "sqlite:///./localsight.db"
 
     jwt_secret: str = ""
     master_encryption_key: str = ""
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     storage_s3_bucket: str = ""
     storage_s3_endpoint: str | None = None
     storage_s3_region: str = "us-east-1"
-    storage_s3_prefix: str = "localvision"
+    storage_s3_prefix: str = "localsight"
 
     # Detector backend. "reference" is a CPU motion proxy that only emits the
     # "person" class and is intended for bootstrapping without staged weights.
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     retention_embeddings_days: int = 90
     retention_audit_days: int = 365
 
-    bootstrap_admin_email: str = "admin@localvision.local"
+    bootstrap_admin_email: str = "admin@localsight.local"
     bootstrap_admin_password: str = ""
 
     # ── derived helpers ──────────────────────────────────────────────────

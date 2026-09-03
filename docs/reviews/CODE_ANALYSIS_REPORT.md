@@ -1,4 +1,4 @@
-# LocalVision — Principal Architect & Engineer Code Review
+# LocalSight — Principal Architect & Engineer Code Review
 
 **Scope:** full repository (`apps/`, `packages/`, `ui/`, `tests/`, `infrastructure/`, `scripts/`) — ~8,200 lines of application code (38 Python modules, 3 UI files), all routers, all security modules, the worker, infra configs, and CI.
 **Method:** 100% of production Python read line-by-line; every finding below was either **reproduced by executing the code** (stack traces, SQL counts, byte measurements, timing runs) or verified by exhaustive grep across the repo. Test baseline: `pytest -q` → **66 passed in 17.5s** (matches README).
@@ -345,7 +345,7 @@ envelope = {'k': 140 bytes wrapped key, 'c': 164 bytes ciphertext}
 
 - `ai_motion_gate_enabled: bool = True` (config.py:47) — never read anywhere (grep). The README describes a motion gate in the pipeline flow ("RTSP -> decode -> [motion gate] -> ..."); there is no gate. `ReferenceMotionDetector` does its own frame-differencing internally, but there's no configurable gate stage, so the flag does nothing.
 - `retention_embeddings_days`, `retention_audit_days` — see F-11.
-- `LOCALVISION_LIVE_DIR` env var read at `live.py:29` as a default, but `main.py:93` computes the mount from a **hard-coded** relative path (`os.path.join(dirname(__file__), "..", "..", "data", "live")`) — setting the env var makes the gateway write segments to a directory the app doesn't serve. Two sources of truth, one of them ignored.
+- `LOCALSIGHT_LIVE_DIR` env var read at `live.py:29` as a default, but `main.py:93` computes the mount from a **hard-coded** relative path (`os.path.join(dirname(__file__), "..", "..", "data", "live")`) — setting the env var makes the gateway write segments to a directory the app doesn't serve. Two sources of truth, one of them ignored.
 
 **Fix:** delete the dead flag or implement the gate; make both live-dir reads use one shared constant (put it in `Settings` as `live_dir` with the env override, and derive both the mount and `_LIVE_ROOT` from it).
 
@@ -365,7 +365,7 @@ envelope = {'k': 140 bytes wrapped key, 'c': 164 bytes ciphertext}
 
 `Settings` reads `.env` **and** environment (`SettingsConfigDict(env_file=".env")`). In the Docker/compose path, environment variables are injected explicitly — but `pydantic-settings` prefers real env vars over `.env`, and the image `COPY . /app` (F-12) ships a `.env` from the build context. A stale build-time `.env` can silently become the runtime config for anything **not** explicitly passed in `docker-compose.yml`'s `environment:` (e.g., `RECORD_*`, `RETENTION_*`, `AI_INFERENCE_FPS`, `AI_CONFIDENCE_THRESHOLD` are NOT in the compose environment list — so the **image's** `.env` wins over the host's `.env` that the compose file's `${VAR}` substitutions read... actually compose `${VAR}` reads the host `.env`, but pydantic reads the image-baked one; the two files can and will diverge). This is a genuine production incident waiting to happen: operators edit `.env`, restart compose, and the worker (whose settings come from pydantic, not compose substitutions) ignores them.
 
-**Fix:** never bake `.env` into the image (see F-12's `.dockerignore`); in `Settings`, prefer `env_file=None` inside containers and pass a `LOCALVISION_ENV_FILE` opt-in, or add a startup log line printing the resolved source of each sensitive setting (never values). Document explicitly which knobs flow via compose env vs `.env`.
+**Fix:** never bake `.env` into the image (see F-12's `.dockerignore`); in `Settings`, prefer `env_file=None` inside containers and pass a `LOCALSIGHT_ENV_FILE` opt-in, or add a startup log line printing the resolved source of each sensitive setting (never values). Document explicitly which knobs flow via compose env vs `.env`.
 
 ---
 
@@ -434,7 +434,7 @@ The security posture is unusually good for this category: Argon2id, JWT rotation
 | M-31 | `_tmp_path` writes to `/tmp` (world-readable, fixed location) — in containers fine, on hosts the segments are world-readable briefly | recorder.py:46-47 | `tempfile.mkdtemp` under storage root with 0700 |
 | M-32 | UI stores JWT in `localStorage` (XSS-exfiltratable; CSP mitigates — pair with httpOnly cookie + CSRF or document the tradeoff) | app.js:13 | Document or move to cookie |
 | M-33 | `.gitignore` lacks `.coverage`, `coverage.xml` (currently untracked clutter; also both are in repo dir) | `git status` | Add to `.gitignore` |
-| M-34 | `localvision.db` / `test_localvision.db` / `data/` correctly ignored; but `.env` is ignored while `test_localvision.db` files live in repo root — fine | git check-ignore | — |
+| M-34 | `localsight.db` / `test_localsight.db` / `data/` correctly ignored; but `.env` is ignored while `test_localsight.db` files live in repo root — fine | git check-ignore | — |
 | M-35 | `docs/api/openapi-summary.md` will drift from reality (no openapi export in CI) | — | CI job: dump `/openapi.json`, diff-check |
 | M-36 | `worker/main.py:215` builds `face_chain`/`matcher` per camera even when `identity_recognition_enabled=false` (cheap objects — but `ReferenceEmbedder` alloc per camera is needless) | worker/main.py:215-216 | Build once, share |
 | M-37 | `events.py:list_events` `total` via `count(subquery)` runs the full filtered query twice on every page | events.py:47-48 | Acceptable; consider keyset pagination for deep pages |

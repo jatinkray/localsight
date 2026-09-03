@@ -1,6 +1,6 @@
 """Detection backends.
 
-LocalVision ships a *swappable* Detector interface (packages.ai.interfaces). This
+LocalSight ships a *swappable* Detector interface (packages.ai.interfaces). This
 module provides production-grade backends behind that same interface:
 
   * ONNXDetector        — runs any ONNX object-detection model via onnxruntime

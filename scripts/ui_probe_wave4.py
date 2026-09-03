@@ -32,7 +32,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8779")
-ADMIN_EMAIL = "admin@localvision.local"
+ADMIN_EMAIL = "admin@localsight.local"
 OUT = Path("ui_audit/wave4")
 AXE = Path(__file__).parent / "vendor" / "axe.min.js"
 

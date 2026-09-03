@@ -1,6 +1,6 @@
 # Multi-Class Object Detection (ONNX)
 
-LocalVision's `Detector` interface is pluggable; the production-ready backend
+LocalSight's `Detector` interface is pluggable; the production-ready backend
 is `ONNXDetector`, which runs any ONNX-exported YOLO/RT-DETR model via
 `onnxruntime`. A `ReferenceMotionDetector` fallback ensures the full pipeline
 runs on CPU without a model.
@@ -41,7 +41,7 @@ These flow into:
 
 ### 1. Stage a model
 
-The ONNX detector requires a model file staged at a known path. LocalVision
+The ONNX detector requires a model file staged at a known path. LocalSight
 **never downloads models from user-supplied URLs** — operators stage them
 directly into the `models/` directory.
 
@@ -105,7 +105,7 @@ python -m apps.worker
 On first frame, you'll see `ONNXDetector` initialize the inference session:
 
 ```
-INFO  localvision.worker  starting pipeline for camera cam1 (Lobby)
+INFO  localsight.worker  starting pipeline for camera cam1 (Lobby)
 ```
 
 ### 4. Verify detection is working
@@ -320,6 +320,6 @@ container image that the ONNX runtime depends on.
 
 ## Future: ONNX Profile M compliance
 
-LocalVision's `Event` shape and `Detector` output are ONVIF Profile M
+LocalSight's `Event` shape and `Detector` output are ONVIF Profile M
 compatible (normalized bboxes, typed events with confidence + duration). The
 profile compliance doc is forthcoming under `docs/integrations/onvif-m.md`.

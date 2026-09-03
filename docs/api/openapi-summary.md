@@ -177,8 +177,8 @@ curl -X PUT http://localhost:8000/api/cameras/$CAM/rules \
 | POST | `/api/live/{camera_id}/stop` | `live:view` (stop transcode; dashboard control) |
 
 Transcodes are lifecycle-managed: streams idle for
-`LOCALVISION_LIVE_IDLE_TIMEOUT_SEC` (default 300 s) or older than
-`LOCALVISION_LIVE_MAX_DURATION_SEC` (default 4 h) are reaped automatically.
+`LOCALSIGHT_LIVE_IDLE_TIMEOUT_SEC` (default 300 s) or older than
+`LOCALSIGHT_LIVE_MAX_DURATION_SEC` (default 4 h) are reaped automatically.
 
 ### Use case: Watch a live camera stream
 ```bash

@@ -31,7 +31,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = os.environ.get("LV_BASE", "http://localhost:8779")
-EMAIL = os.environ.get("LV_SCAN_USER", "admin@localvision.local")
+EMAIL = os.environ.get("LV_SCAN_USER", "admin@localsight.local")
 PASSWORD = os.environ.get("LV_SCAN_PASSWORD", "Demo-Admin-2026!")
 OUT = Path("ui_maturity")
 SHOTS = OUT / "shots"

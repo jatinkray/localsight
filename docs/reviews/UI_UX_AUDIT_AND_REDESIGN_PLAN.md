@@ -1,10 +1,10 @@
-# LocalVision — Deep UI/UX Audit & Enterprise Redesign Plan
+# LocalSight — Deep UI/UX Audit & Enterprise Redesign Plan
 
 > **Prepared as:** Principal UI/UX Designer
 > **Method:** Evidence-driven audit — Playwright-driven interaction flows on the live app (seeded with 5 cameras, 96 events, 4 identities, 24 segments), computed-style design-metric extraction, console/network capture, keyboard-order tracing, and flow probes across desktop (1280×800) and mobile (390×844) viewports.
 > **Artifacts:** `ui_audit/` (17 screenshots, findings JSON, design-metrics JSON, probe results)
 > **Date:** 2026-09-01
-> **Verdict up front:** The current UI is a **functional skeleton**, not an interface for a security product. It has excellent raw material (tiny 15.9 KB bundle, clean separation, hardened backend CSP) but ships **6 read-only table views for a 40-endpoint API**, breaks its own flagship timeline under CSP, fails WCAG hit-target and contrast minimums on **every interactive element**, and has no design system. The redesign in this plan turns LocalVision into an interface that an enterprise security operator can run a shift from.
+> **Verdict up front:** The current UI is a **functional skeleton**, not an interface for a security product. It has excellent raw material (tiny 15.9 KB bundle, clean separation, hardened backend CSP) but ships **6 read-only table views for a 40-endpoint API**, breaks its own flagship timeline under CSP, fails WCAG hit-target and contrast minimums on **every interactive element**, and has no design system. The redesign in this plan turns LocalSight into an interface that an enterprise security operator can run a shift from.
 
 ---
 
@@ -176,7 +176,7 @@ The UI is the bottleneck between a feature-complete backend and a sellable produ
 
 What an enterprise buyer evaluates in a VMS UI (based on the competitor set in `PRODUCT_STRATEGY_2026.md` — Verkada, Milestone/Genetec, Avigilon, BriefCam, Axis, Hanwha):
 
-| Capability | Verkada-class standard | LocalVision today |
+| Capability | Verkada-class standard | LocalSight today |
 |---|---|---|
 | Video wall / live grid with 1-click drill-down | Multi-view tiles, drag-arrange, PTZ overlay | ❌ none |
 | Event-centric investigation loop (thumbnail → clip → export) | Thumbnail in list; hover-scrub; one-click export with audit | ❌ raw JSON link |

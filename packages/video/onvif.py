@@ -1,7 +1,7 @@
 """ONVIF client (Profile S discovery + stream URIs).
 
 Broad camera compatibility is the #1 shortlist criterion for buyers. This client
-lets LocalVision auto-discover ONVIF devices on the LAN and fetch their RTSP
+lets LocalSight auto-discover ONVIF devices on the LAN and fetch their RTSP
 stream URIs without vendor-specific URL guessing, then feed them into the existing
 Camera model. It implements the minimal, widely-supported ONVIF operations:
 

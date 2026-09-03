@@ -10,7 +10,7 @@ TP-Link ships two camera families with third-party streaming:
   "Camera Account" is required. URLs carry credentials:
   ``rtsp://<user>:<pass>@<ip>:554/stream1|stream2``.
 
-All of these are plain RTSP, so LocalVision ingests them directly. These helpers
+All of these are plain RTSP, so LocalSight ingests them directly. These helpers
 just encode the exact vendor URL/port/auth conventions so adding a TP-Link device
 is a single, correct call instead of hand-building URLs.
 

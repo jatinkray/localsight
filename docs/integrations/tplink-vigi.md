@@ -1,18 +1,18 @@
 # TP-Link integration (VIGI & Tapo)
 
-LocalVision is RTSP/ONVIF-native, which is exactly what TP-Link's surveillance gear
+LocalSight is RTSP/ONVIF-native, which is exactly what TP-Link's surveillance gear
 speaks. This document confirms compatibility and shows the native setup for TP-Link.
 
 ## Verdict
 
-| Device | Protocols | Works with LocalVision | Native fit |
+| Device | Protocols | Works with LocalSight | Native fit |
 |--------|----------|------------------------|------------|
 | **VIGI camera** (direct) | RTSP `stream1`/`stream2`, ONVIF S/G/T | Yes — no code change | Full |
 | **VIGI NVR** | Per-channel RTSP `live/ch/<N>/stream/<1|2>`, ONVIF | Yes — `POST /api/cameras/from-nvr` | Full (1 call provisions all channels) |
 | **Tapo (wired)** | RTSP `stream1`/`stream2`, ONVIF S | Yes (creds in URL) | Full for wired models |
 | **Tapo (battery/solar)** | — | No | Unsupported by TP-Link itself |
 
-LocalVision maps onto TP-Link 1:1: the **substream** (`stream2` / channel sub) is
+LocalSight maps onto TP-Link 1:1: the **substream** (`stream2` / channel sub) is
 used for AI (bandwidth-efficient), the **main stream** (`stream1`) for recording.
 
 ## Confirmed conventions (TP-Link official docs)
@@ -27,7 +27,7 @@ used for AI (bandwidth-efficient), the **main stream** (`stream1`) for recording
 - Live: `rtsp://<nvr>:554/live/ch/<N>/stream/1` (main) and `/stream/2` (sub)
 - Channel **0** = channel-zero overview (main only); channels **1..N** are cameras
 - ONVIF port 80/2020; digest auth
-- This is the most "native" path: add the NVR once, LocalVision ingests every channel.
+- This is the most "native" path: add the NVR once, LocalSight ingests every channel.
 
 ### Tapo (wired only)
 - Main: `rtsp://<user>:<pass>@<ip>:554/stream1` · Sub: `.../stream2`
@@ -39,7 +39,7 @@ used for AI (bandwidth-efficient), the **main stream** (`stream1`) for recording
 ## Security notes (important)
 - TP-Link states RTSP/ONVIF are **not secure** and must not be exposed publicly.
   Put cameras/NVR on an isolated VLAN; reach them only via VPN/port-forward if remote.
-- LocalVision's **SSRF egress guard blocks private/loopback/metadata by default** —
+- LocalSight's **SSRF egress guard blocks private/loopback/metadata by default** —
   allow-list your camera VLAN in `SSRF_ALLOWLIST` (e.g. `192.168.0.0/16`) or camera
   adds will be rejected. This is by design.
 - Stream URLs and NVR credentials are **encrypted at rest** and never returned to clients.
@@ -79,17 +79,17 @@ curl -s -X POST http://localhost:8000/api/cameras \
 
 ## Gotchas
 - **Digest SHA-256 incompatibility**: some third-party ONVIF clients fail against
-  VIGI's SHA-256 digest. FFmpeg/LocalVision handle digest fine; if ONVIF discovery
+  VIGI's SHA-256 digest. FFmpeg/LocalSight handle digest fine; if ONVIF discovery
   misbehaves, set the camera's *Digest Authentication Algorithm* to MD5/SHA256.
 - **ONVIF port after firmware upgrade**: older port 2020 stays open; both 80 and
-  2020 are accepted by LocalVision's presets.
+  2020 are accepted by LocalSight's presets.
 - **Tapo stream limits**: a camera can't do cloud + microSD + NVR simultaneously;
   remove the microSD to keep NVR/RTSP recording.
-- **No permanent public exposure** — LocalVision issues signed, expiring media URLs.
+- **No permanent public exposure** — LocalSight issues signed, expiring media URLs.
 
 ## Beyond TP-Link — ONVIF & multi-vendor
 
-LocalVision is not limited to TP-Link. Any RTSP/ONVIF camera works:
+LocalSight is not limited to TP-Link. Any RTSP/ONVIF camera works:
 
 - **ONVIF discovery** — `POST /api/cameras/onvif/discover` finds devices on the LAN
   (WS-Discovery). `POST /api/cameras/onvif/streams` returns RTSP URIs for a device

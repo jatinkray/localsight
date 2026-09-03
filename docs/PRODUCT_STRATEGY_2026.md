@@ -1,14 +1,14 @@
-# LocalVision — Deep Codebase Analysis, Market Research & Product Improvement Plan (2026)
+# LocalSight — Deep Codebase Analysis, Market Research & Product Improvement Plan (2026)
 
 > Prepared for: product/engineering leadership
-> Scope: make LocalVision compatible with *most* CCTV surveillance footage analysis and competitive with market leaders (Verkada, Milestone, Genetec, Avigilon, BriefCam, Axis, Hanwha, Hikvision, Coram)
+> Scope: make LocalSight compatible with *most* CCTV surveillance footage analysis and competitive with market leaders (Verkada, Milestone, Genetec, Avigilon, BriefCam, Axis, Hanwha, Hikvision, Coram)
 > Date: 2026-08-31
 
 ---
 
 ## 1. Executive Summary
 
-LocalVision is a **securely-architected, local-first video intelligence platform** with an unusually strong *security and privacy* foundation (Argon2id, envelope encryption, RBAC, SSRF guard, immutable audit log, signed URLs, fail-safe stream gateway). That foundation is genuinely ahead of many open-source VMS projects.
+LocalSight is a **securely-architected, local-first video intelligence platform** with an unusually strong *security and privacy* foundation (Argon2id, envelope encryption, RBAC, SSRF guard, immutable audit log, signed URLs, fail-safe stream gateway). That foundation is genuinely ahead of many open-source VMS projects.
 
 However, the product today is a **secure skeleton, not a surveillance-analytics product**:
 
@@ -20,7 +20,7 @@ However, the product today is a **secure skeleton, not a surveillance-analytics 
 
 **Market context.** The AI-in-video-surveillance market is ~USD 6.8–11.2B in 2026 and growing 14–21% CAGR to USD 13–38B by 2030/2034 (Mordor, MarketIntelo, Polaris, ResearchAndMarkets). Software/analytics is the fastest-growing slice (~17–18% CAGR). The 2026 differentiator is **Gen-3/Gen-4 analytics** (semantic/NL search via CLIP/VLM, behavior analytics, ANPR, forensic search) delivered **on open camera fleets** (BYOC) with **privacy/compliance** (EU AI Act, GDPR, NDAA).
 
-**Recommendation.** Localize the already-strong security/privacy posture into the core *product* differentiator, then close the analytics gap in three phases: (P1) real multi-class detection + actual recording + broad ONVIF/RTSP camera compatibility; (P2) behavior analytics + ANPR + alerting + live view + analytics BI; (P3) edge runtime + VLM semantic search + compliance tooling. This positions LocalVision as the **privacy-first, open-camera, on-prem alternative to Verkada/Avigilon** — a defensible wedge against cloud-locked and NDAA-restricted incumbents.
+**Recommendation.** Localize the already-strong security/privacy posture into the core *product* differentiator, then close the analytics gap in three phases: (P1) real multi-class detection + actual recording + broad ONVIF/RTSP camera compatibility; (P2) behavior analytics + ANPR + alerting + live view + analytics BI; (P3) edge runtime + VLM semantic search + compliance tooling. This positions LocalSight as the **privacy-first, open-camera, on-prem alternative to Verkada/Avigilon** — a defensible wedge against cloud-locked and NDAA-restricted incumbents.
 
 ---
 
@@ -102,28 +102,28 @@ From Fora Soft / IPVM / ONVIF specs, the expected analytic catalog is now standa
 - Domain: **ANPR/LPR, PPE (hard hat/vest), fire & smoke, queue length, people counting, heatmaps, traffic flow**
 
 **Tier B — Identity (biometric, high-risk, EU AI Act Annex III, partly prohibited in public spaces since Feb 2025):**
-- Face detection + watchlist matching (KNOWN/UNKNOWN/UNCERTAIN — LocalVision already models this correctly)
+- Face detection + watchlist matching (KNOWN/UNKNOWN/UNCERTAIN — LocalSight already models this correctly)
 
 **Tier C — Semantic (Gen-3/4):**
 - Natural-language forensic search (CLIP/VLM): "person in red near gate at 14:00"
 - Video summarization ("what happened today")
 
-**Standardization leverage:** ONVIF **Profile M** (analytics metadata/events) and the **Analytics Service Specification** (normative Line/Field/Loitering detectors) mean LocalVision can *consume* camera-native analytics AND *emit* its own analytics over a standard interface — avoiding lock-in and letting it ride on 14k+ ONVIF devices.
+**Standardization leverage:** ONVIF **Profile M** (analytics metadata/events) and the **Analytics Service Specification** (normative Line/Field/Loitering detectors) mean LocalSight can *consume* camera-native analytics AND *emit* its own analytics over a standard interface — avoiding lock-in and letting it ride on 14k+ ONVIF devices.
 
-### 3.4 Compliance tailwinds (LocalVision's wedge)
+### 3.4 Compliance tailwinds (LocalSight's wedge)
 
 - **EU AI Act**: real-time remote biometric ID in public spaces **prohibited since Feb 2025**; high-risk biometric obligations (Annex III) phased to Dec 2027. Event analytics = light-touch.
 - **GDPR / CCPA / UK Procurement Act**: privacy-by-design, data minimization, DPIA, signage, retention limits.
-- **NDAA Section 889**: US fed cannot use Hikvision/Dahua. **LocalVision is NDAA-clean by default** (open, on-prem, no Chinese-stack coupling).
-- → LocalVision's existing privacy/encryption posture is a **sellable differentiator**, not just hygiene.
+- **NDAA Section 889**: US fed cannot use Hikvision/Dahua. **LocalSight is NDAA-clean by default** (open, on-prem, no Chinese-stack coupling).
+- → LocalSight's existing privacy/encryption posture is a **sellable differentiator**, not just hygiene.
 
 ---
 
-## 4. Capability Gap Matrix (LocalVision vs Market Giants)
+## 4. Capability Gap Matrix (LocalSight vs Market Giants)
 
 Legend: ✅ shipped · 🟡 partial/placeholder · ❌ missing
 
-| Capability | LocalVision | Verkada | Milestone | Genetec | Avigilon | Axis |
+| Capability | LocalSight | Verkada | Milestone | Genetec | Avigilon | Axis |
 |---|---|---|---|---|---|---|
 | On-prem / local-first | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Privacy-by-design + encryption | ✅ | 🟡 | 🟡 | 🟡 | 🟡 | 🟡 |
@@ -144,7 +144,7 @@ Legend: ✅ shipped · 🟡 partial/placeholder · ❌ missing
 | Audit / RBAC / MFA | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 |
 | NDAA-clean | ✅ | n/a | ✅ | ✅ | ✅ | ✅ |
 
-**Read-out:** LocalVision wins only on *security/privacy + local-first*. It loses on **every analytic and camera-compatibility dimension** that buyers shortlist on. The plan below closes exactly those.
+**Read-out:** LocalSight wins only on *security/privacy + local-first*. It loses on **every analytic and camera-compatibility dimension** that buyers shortlist on. The plan below closes exactly those.
 
 ---
 
@@ -189,7 +189,7 @@ Goal: parity with Gen-3 leaders and a privacy wedge.
     same `Detector` contract; INT8 calibration path defined. GPU scheduler with bounded queue + CPU fallback.
 13. ✅ **Semantic / NL search (Gen-3/4)**: `ReferenceSceneEmbedder` + `SemanticSearch` scene embedding +
     **natural-language forensic search** ("person in red near gate 14:00–16:00"). Keep on-prem; model-versioned in registry.
-14. 🟡 **ONVIF Profile M server** so LocalVision analytics surface in 3rd-party VMS; and **consume** camera-native analytics.
+14. 🟡 **ONVIF Profile M server** so LocalSight analytics surface in 3rd-party VMS; and **consume** camera-native analytics.
 15. 🟡 **Compliance toolkit**: DPIA templates, signage hints, retention dashboards, biometric lawful-basis gate,
     **EU AI Act high-risk** checklist, export-with-face-mask. Turns the privacy posture into a sales artifact.
 
@@ -236,7 +236,7 @@ Goal: parity with Gen-3 leaders and a privacy wedge.
 - Recording survives restart; AI survives worker restart; one bad camera never drops the platform.
 - Behavior + ANPR + fire/smoke + PPE shipped and tunable per camera.
 - Live view < 500 ms; alerts < 2 s; NL search over 24 h < 5 s.
-- Third-party VMS consumes LocalVision analytics via ONVIF Profile M.
+- Third-party VMS consumes LocalSight analytics via ONVIF Profile M.
 - Passes an independent security + EU AI Act high-risk review.
 
 ---

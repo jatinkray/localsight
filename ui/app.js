@@ -1,4 +1,4 @@
-// LocalVision app shell — ES-module orchestrator.
+// LocalSight app shell — ES-module orchestrator.
 //
 // Wave 1: the hash router (core/router.js) owns view state. Views register
 // loaders; navigation = hash change; back/forward and shareable URLs work.

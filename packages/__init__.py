@@ -1,1 +1,1 @@
-"""LocalVision shared packages (domain, security, ai, video, storage, observability)."""
+"""LocalSight shared packages (domain, security, ai, video, storage, observability)."""

@@ -20,7 +20,7 @@ import jwt
 from packages.security.errors import AuthError
 
 ALGORITHM = "HS256"
-ISSUER = "localvision"
+ISSUER = "localsight"
 
 
 def _now() -> dt.datetime:

@@ -1,4 +1,4 @@
-# Minimal Prometheus scrape config for LocalVision.
+# Minimal Prometheus scrape config for LocalSight.
 # Metrics are exposed by the API at /api/system/metrics in Prometheus text format.
 #
 # The endpoint requires auth (session OR a static bearer token). Point
@@ -10,14 +10,14 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: localvision-api
+  - job_name: localsight-api
     metrics_path: /api/system/metrics
     authorization:
       type: Bearer
       credentials: ${METRICS_SCRAPE_TOKEN}
     static_configs:
       - targets: ["api:8000"]
-  - job_name: localvision-worker
+  - job_name: localsight-worker
     # The worker shares the API's metrics endpoint (in-process registry);
     # both jobs carry the scrape token.
     metrics_path: /api/system/metrics

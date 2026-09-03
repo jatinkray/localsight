@@ -26,7 +26,7 @@ Do not simply create a demo. Produce an architecture and implementation that cou
 
 Build a platform tentatively named:
 
-LocalVision
+LocalSight
 
 The platform connects to one or more NVRs/IP cameras and continuously processes their streams.
 
@@ -1685,7 +1685,7 @@ Use a modular monolith plus dedicated AI/video workers initially.
 
 Create:
 
-localvision/
+localsight/
 ├── apps/
 │   ├── api/
 │   ├── web/

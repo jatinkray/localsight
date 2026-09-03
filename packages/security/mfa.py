@@ -57,7 +57,7 @@ def current_code(secret_b32: str, when: float | None = None) -> str:
     return str(_hotp(secret_bytes, counter)).zfill(_DIGITS)
 
 
-def provisioning_uri(secret_b32: str, account: str, issuer: str = "LocalVision") -> str:
+def provisioning_uri(secret_b32: str, account: str, issuer: str = "LocalSight") -> str:
     label = urllib.parse.quote(f"{issuer}:{account}")
     return (
         f"otpauth://totp/{label}"

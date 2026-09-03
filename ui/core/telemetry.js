@@ -69,7 +69,7 @@ export function exportTelemetry() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `localvision-ui-marks-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `localsight-ui-marks-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }

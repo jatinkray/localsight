@@ -114,7 +114,7 @@ def test_alert(db: Session = Depends(get_db), rt: Runtime = Depends(get_runtime)
         except Exception:  # noqa: BLE001 - bad route config / no broker must not 500
             continue
     alert = Alert(rule_id="test", rule_type="test", camera_id="", severity="info",
-                  title="LocalVision test alert", message="This is a connectivity test.",
+                  title="LocalSight test alert", message="This is a connectivity test.",
                   ts=dt.datetime.now(dt.timezone.utc))
     delivered = 0
     for ntf in notifiers:

@@ -1,4 +1,4 @@
-# Contributing to LocalVision
+# Contributing to LocalSight
 
 Thank you for contributing! This guide covers the development workflow, standards,
 and quality gates every PR must pass.
@@ -35,7 +35,7 @@ docs/xxx       — documentation branches (PR → main)
 
 ## Commit Message Format (Conventional Commits)
 
-LocalVision follows [Conventional Commits](https://www.conventionalcommits.org/):
+LocalSight follows [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 <type>(<scope>): <short summary>
@@ -146,9 +146,9 @@ When adding or changing a feature, update:
 ## Filing Issues
 
 - **Bug reports**: include Python version, stack trace, steps to reproduce, and environment details.
-- **Feature requests**: describe the use case, expected behavior, and how it fits the LocalVision architecture.
+- **Feature requests**: describe the use case, expected behavior, and how it fits the LocalSight architecture.
 - **Security issues**: do NOT open a public issue. Use GitHub Private Vulnerability Reporting or email the maintainers directly.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the same license as LocalVision (see LICENSE).
+By contributing, you agree that your contributions will be licensed under the same license as LocalSight (see LICENSE).

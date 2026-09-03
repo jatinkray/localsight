@@ -77,7 +77,7 @@ def estimate(
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="LocalVision capacity planner")
+    p = argparse.ArgumentParser(description="LocalSight capacity planner")
     p.add_argument("--cameras", type=int, default=4)
     p.add_argument("--main-fps", type=int, default=15)
     p.add_argument("--main-bitrate-mbps", type=float, default=4.0)
@@ -100,7 +100,7 @@ def main() -> int:
         return 0
 
     f = out["fleet"]
-    print("LocalVision capacity estimate")
+    print("LocalSight capacity estimate")
     print("=" * 40)
     print(f"Cameras                : {f['cameras']}")
     print(f"Total bandwidth        : {f['total_bandwidth_mbps']} Mbps ({f['total_bandwidth_gbps']} Gbps)")

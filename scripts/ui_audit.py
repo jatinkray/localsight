@@ -1,11 +1,11 @@
-"""Playwright UI/UX audit for the LocalVision dashboard.
+"""Playwright UI/UX audit for the LocalSight dashboard.
 
 Drives the real app (seeded dev DB) through every view, captures screenshots,
 console errors, failed requests, and interaction timings.
 
 Usage:
     .venv/bin/python scripts/ui_audit.py --base http://127.0.0.1:8777 \
-        --email admin@localvision.local --password '…' --out ui_audit/
+        --email admin@localsight.local --password '…' --out ui_audit/
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ VIEWS = ["dashboard", "cameras", "events", "timeline", "people", "audit"]
 
 def _admin_login(base: str, env_pw: str) -> str:
     import urllib.request
-    body = json.dumps({"email": "admin@localvision.local", "password": env_pw}).encode()
+    body = json.dumps({"email": "admin@localsight.local", "password": env_pw}).encode()
     r = urllib.request.Request(f"{base}/api/auth/login", data=body,
                                headers={"Content-Type": "application/json"})
     return json.loads(urllib.request.urlopen(r).read())["access_token"]

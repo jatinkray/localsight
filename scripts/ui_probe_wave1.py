@@ -28,7 +28,7 @@ if os.environ.get("LV_INSECURE_TLS"):
     ssl._create_default_https_context = ssl._create_unverified_context
 
 BASE = os.environ.get("LV_BASE", "http://127.0.0.1:8781")
-ADMIN_EMAIL = "admin@localvision.local"
+ADMIN_EMAIL = "admin@localsight.local"
 OUT = Path("ui_audit/wave1")
 
 

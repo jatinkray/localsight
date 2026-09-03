@@ -1,6 +1,6 @@
 # CI/CD Pipeline
 
-LocalVision uses a multi-stage GitHub Actions pipeline that enforces quality,
+LocalSight uses a multi-stage GitHub Actions pipeline that enforces quality,
 security, and operational standards on every pull request and merge.
 
 ## Overview
@@ -65,7 +65,7 @@ Runs the full pytest suite against an isolated SQLite database. The conftest
 | Database | SQLite (in-process, no service needed) |
 | Coverage gate | ≥ 50% (raise as coverage grows) |
 | Codecov upload | On PRs (optional, requires `CODECOV_TOKEN` secret) |
-| Test artifacts | `coverage.xml`, `test_localvision.db`, `.pytest_cache/` |
+| Test artifacts | `coverage.xml`, `test_localsight.db`, `.pytest_cache/` |
 
 The job installs `ffmpeg` system-wide because the recorder tests exercise the
 segmentation logic. All 66 tests run in ~17 seconds.
@@ -204,15 +204,15 @@ ruff check . --target-version=py312
 mypy packages apps --ignore-missing-imports
 
 # Unit tests (with coverage)
-rm -f test_localvision.db
+rm -f test_localsight.db
 pytest tests/ -v --cov=packages --cov=apps --cov-fail-under=50
 
 # Dependency audit
 pip-audit
 
 # Container scan
-docker build -t localvision:test -f infrastructure/docker/Dockerfile .
-trivy image --severity CRITICAL,HIGH localvision:test
+docker build -t localsight:test -f infrastructure/docker/Dockerfile .
+trivy image --severity CRITICAL,HIGH localsight:test
 ```
 
 ## Adding a new quality gate
@@ -227,7 +227,7 @@ trivy image --severity CRITICAL,HIGH localvision:test
 
 ## Why this pipeline
 
-LocalVision is a security/privacy product. The CI/CD pipeline enforces:
+LocalSight is a security/privacy product. The CI/CD pipeline enforces:
 
 - **No insecure code**: CodeQL + Semgrep catch injection, crypto misuse, and
   auth bypass patterns.

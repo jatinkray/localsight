@@ -1,4 +1,4 @@
-# Dependabot configuration for LocalVision
+# Dependabot configuration for LocalSight
 #
 # Automatically open PRs when:
 #   - Python packages in requirements.txt have new versions

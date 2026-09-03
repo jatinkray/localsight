@@ -1,6 +1,6 @@
-# LocalVision User Guide
+# LocalSight User Guide
 
-End-user documentation for operators of a LocalVision deployment: logging in,
+End-user documentation for operators of a LocalSight deployment: logging in,
 managing cameras, watching live and recorded video, working with events and
 alerts, and configuring privacy controls. For developer/agent documentation
 see `AGENTS.md`; for operations (deployment, retention, troubleshooting) see
@@ -502,7 +502,7 @@ The Privacy view is the resident-audit surface, four cards:
   loads and their timing, slow views, page errors) to help you spot a
   problem on YOUR console. It is stored in memory only, never written to
   disk, never sent anywhere, and **Download JSON** hands the file to you
-  — LocalVision's own servers never see it, because there are none.
+  — LocalSight's own servers never see it, because there are none.
 
 ## What is encrypted, and where
 

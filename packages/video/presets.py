@@ -1,6 +1,6 @@
 """Vendor stream-URL presets (broad camera compatibility).
 
-LocalVision is open-camera (BYOC). This module centralizes the per-vendor RTSP / CGI
+LocalSight is open-camera (BYOC). This module centralizes the per-vendor RTSP / CGI
 / ISAPI / ONVIF URL conventions so the UI and the bulk-provisioning API can suggest
 correct URLs for the most common fleets, mirroring what Milestone/Axis expose in
 their device libraries. TP-Link VIGI is kept for backward compatibility.

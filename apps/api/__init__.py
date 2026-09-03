@@ -1,1 +1,1 @@
-"""LocalVision API application package."""
+"""LocalSight API application package."""

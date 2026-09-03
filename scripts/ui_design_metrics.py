@@ -78,7 +78,7 @@ def _admin_token() -> str:
             if line.startswith("BOOTSTRAP_ADMIN_PASSWORD"):
                 pw = line.split("=", 1)[1].strip().strip('"')
                 break
-    body = json.dumps({"email": "admin@localvision.local", "password": pw}).encode()
+    body = json.dumps({"email": "admin@localsight.local", "password": pw}).encode()
     r = urllib.request.Request(f"{BASE}/api/auth/login", data=body,
                                headers={"Content-Type": "application/json"})
     return json.loads(urllib.request.urlopen(r).read())["access_token"]

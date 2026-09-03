@@ -1,4 +1,4 @@
-# LocalVision API/worker image.
+# LocalSight API/worker image.
 # Lean: Python slim + FFmpeg (for real RTSP decoding) + the Python deps.
 # Secrets are injected at runtime via env / Docker secrets — never baked in.
 FROM python:3.12-slim
@@ -23,9 +23,9 @@ RUN pip install -r requirements-prod.txt
 COPY . /app
 
 # Run as a non-root user (least privilege for media/AI processing).
-RUN useradd -m -u 10001 localvision \
-    && mkdir -p /app/data/storage && chown -R localvision:localvision /app/data
-USER localvision
+RUN useradd -m -u 10001 localsight \
+    && mkdir -p /app/data/storage && chown -R localsight:localsight /app/data
+USER localsight
 
 # API (uvicorn) or worker (apps.worker.main) selected via COMMAND.
 EXPOSE 8000

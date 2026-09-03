@@ -1,4 +1,4 @@
-# LocalVision backend dependencies
+# LocalSight backend dependencies
 # Pinned after a clean install in this environment; adjust to your mirror.
 fastapi==0.141.1
 uvicorn[standard]==0.34.0

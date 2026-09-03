@@ -1,4 +1,4 @@
-# LocalVision CI/CD Pipeline
+# LocalSight CI/CD Pipeline
 #
 # Quality gates:
 #   1. Lint + type-check
@@ -75,7 +75,7 @@ jobs:
     env:
       PYTHON_VERSION: "3.12"
       # Force SQLite (conftest.py default); avoids needing psycopg for unit tests.
-      DATABASE_URL: sqlite:///./test_localvision.db
+      DATABASE_URL: sqlite:///./test_localsight.db
 
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +99,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          rm -f test_localvision.db
+          rm -f test_localsight.db
           # "-m not ui": the Playwright e2e suite (tests/ui) runs in its own
           # job with browser dependencies — keep this job fast and hermetic.
           pytest tests/ -v --tb=short -m "not ui" --cov=packages --cov=apps --cov-report=xml --cov-fail-under=50
@@ -120,7 +120,7 @@ jobs:
           path: |
             coverage.xml
             .pytest_cache
-            test_localvision.db
+            test_localsight.db
           retention-days: 7
         continue-on-error: true
 
@@ -132,13 +132,13 @@ jobs:
     needs: [test]  # only run after unit tests pass
     env:
       PYTHON_VERSION: "3.12"
-      DATABASE_URL: postgresql+psycopg://localvision:testpassword@localhost:5432/localvision_test
+      DATABASE_URL: postgresql+psycopg://localsight:testpassword@localhost:5432/localsight_test
     services:
       postgres:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_DB: localvision_test
-          POSTGRES_USER: localvision
+          POSTGRES_DB: localsight_test
+          POSTGRES_USER: localsight
           POSTGRES_PASSWORD: testpassword
         options: >-
           --health-cmd pg_isready
@@ -272,7 +272,7 @@ jobs:
     # Skip on workflow_dispatch; only on push and PR
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     env:
-      IMAGE_NAME: localvision:test
+      IMAGE_NAME: localsight:test
     steps:
       - uses: actions/checkout@v4
 
@@ -466,4 +466,4 @@ jobs:
         if: needs.test.result == 'success'
         run: |
           echo "## ✅ Tests passed" >> $GITHUB_STEP_SUMMARY
-          echo "LocalVision test suite completed successfully." >> $GITHUB_STEP_SUMMARY
+          echo "LocalSight test suite completed successfully." >> $GITHUB_STEP_SUMMARY

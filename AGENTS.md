@@ -1,4 +1,4 @@
-# AGENTS.md — LocalVision Engineering Agent Guide
+# AGENTS.md — LocalSight Engineering Agent Guide
 
 This document orients any engineering agent (AI or human) working in this
 repository: what the system is, where things live, the invariants that must
@@ -6,7 +6,7 @@ never be violated, and the workflow expected of every change.
 
 ## What this system is
 
-LocalVision is a **local-first video intelligence platform**: cameras on a
+LocalSight is a **local-first video intelligence platform**: cameras on a
 private LAN, AI inference on the customer's own hardware, no cloud dependency.
 The security posture (local processing, envelope encryption, privacy by
 design) is the product — treat regressions against it as functional bugs, not
@@ -117,7 +117,7 @@ tests/           unit + security + API + integration; tests/ui = Playwright e2e
   stop event so recorders flush and children are reaped. The alert sender and
   retention sweeper run on their own daemon threads.
 - **Live view**: transcodes are tracked in `_live_streams` with idle/max-age
-  reaping; `LOCALVISION_LIVE_DIR` sets the shared root for both the ffmpeg
+  reaping; `LOCALSIGHT_LIVE_DIR` sets the shared root for both the ffmpeg
   output and the `/live-media` mount (single source: `apps/api/domain_live_cfg.py`).
 
 ## Authentication & authorization quick reference

@@ -25,7 +25,7 @@ docker compose -f infrastructure/compose/docker-compose.yml --env-file .env up -
 
 ## Local debug access
 The bootstrap admin is created once on first run from `BOOTSTRAP_ADMIN_EMAIL` /
-`BOOTSTRAP_ADMIN_PASSWORD` in `.env` (default `admin@localvision.local` /
+`BOOTSTRAP_ADMIN_PASSWORD` in `.env` (default `admin@localsight.local` /
 `CHANGE_ME_STRONG_PASSWORD` in `.env.example`). For local debugging:
 
 - **UI**: open `http://localhost:8000` and sign in with those credentials.
@@ -33,7 +33,7 @@ The bootstrap admin is created once on first run from `BOOTSTRAP_ADMIN_EMAIL` /
   ```bash
   TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
     -H 'Content-Type: application/json' \
-    -d '{"email":"admin@localvision.local","password":"CHANGE_ME_STRONG_PASSWORD"}' \
+    -d '{"email":"admin@localsight.local","password":"CHANGE_ME_STRONG_PASSWORD"}' \
     | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
   curl http://localhost:8000/api/auth/me -H "Authorization: Bearer $TOKEN"
   ```
@@ -57,8 +57,8 @@ embeddings) before any non-local deployment — never reuse the generated dev ke
 - `POST /api/live/{camera_id}/stop` — stop a transcode explicitly (authed).
 
 Live transcodes are lifecycle-managed: streams with no playback for
-`LOCALVISION_LIVE_IDLE_TIMEOUT_SEC` (default 300 s) or older than
-`LOCALVISION_LIVE_MAX_DURATION_SEC` (default 4 h) are terminated automatically
+`LOCALSIGHT_LIVE_IDLE_TIMEOUT_SEC` (default 300 s) or older than
+`LOCALSIGHT_LIVE_MAX_DURATION_SEC` (default 4 h) are terminated automatically
 by a reaper thread; the API also stops all transcodes on shutdown.
 
 ## Retention (configurable, automatic)
@@ -113,7 +113,7 @@ Set `AI_MODEL_NAME` and `AI_MODEL_VERSION` to match the registry entry. The
 
 ## Alert channels
 
-LocalVision routes analytic events to four channels, each configured via
+LocalSight routes analytic events to four channels, each configured via
 `POST /api/alerts/routes`:
 
 ### Webhook
@@ -215,7 +215,7 @@ curl -X POST http://localhost:8000/api/alerts/test -H "Authorization: Bearer $TO
 - **Prometheus scrape 401**: set `METRICS_SCRAPE_TOKEN` on the api service AND in
   `infrastructure/monitoring/prometheus.yml` (they must match), then restart both.
 - **Live transcodes accumulate**: they shouldn't — idle streams are reaped at
-  `LOCALVISION_LIVE_IDLE_TIMEOUT_SEC`. If they persist, check the API logs for
+  `LOCALSIGHT_LIVE_IDLE_TIMEOUT_SEC`. If they persist, check the API logs for
   reaper-thread errors; `POST /api/live/{id}/stop` stops one immediately.
 - **Event clip returns no segments**: the event has no overlapping `VideoSegment` rows in its
   time window. Check that recording is enabled (`RECORD_ENABLED=true`) and segments exist.

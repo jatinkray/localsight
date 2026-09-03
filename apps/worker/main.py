@@ -49,7 +49,7 @@ from packages.video.gateway import StreamGateway
 from packages.video.recorder import Recorder
 from packages.video.sources import FFmpegFrameSource, SyntheticFrameSource
 
-log = logging.getLogger("localvision.worker")
+log = logging.getLogger("localsight.worker")
 
 
 # ── alert routing (reads AlertRoute from the DB) ─────────────────────────────

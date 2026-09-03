@@ -44,7 +44,7 @@ SERVER_ENV = {
     "BOOTSTRAP_ADMIN_EMAIL": "admin@test.com",
     "BOOTSTRAP_ADMIN_PASSWORD": "UiE2e-Pw-123456!",
     "STORAGE_LOCAL_ROOT": str(_ROOT / "storage"),
-    "LOCALVISION_LIVE_DIR": str(_ROOT / "live"),
+    "LOCALSIGHT_LIVE_DIR": str(_ROOT / "live"),
     "AI_IDENTITY_RECOGNITION_ENABLED": "false",
     "SSRF_ALLOWLIST": "192.168.99.0/24",
 }

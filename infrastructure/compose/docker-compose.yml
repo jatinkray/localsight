@@ -1,4 +1,4 @@
-# LocalVision — local-first deployment (Docker Compose).
+# LocalSight — local-first deployment (Docker Compose).
 #
 # Brings up: PostgreSQL (+pgvector), the API, the AI/video worker, and an nginx
 # reverse proxy (TLS termination + security headers). Stores data on local
@@ -14,14 +14,14 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: localvision
-      POSTGRES_USER: localvision
+      POSTGRES_DB: localsight
+      POSTGRES_USER: localsight
       # Use a Docker secret / real password in production, not this placeholder.
       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U localvision"]
+      test: ["CMD-SHELL", "pg_isready -U localsight"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,7 +33,7 @@ services:
       dockerfile: infrastructure/docker/Dockerfile
     command: uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
     environment:
-      DATABASE_URL: postgresql+psycopg://localvision:${DB_PASSWORD:-changeme}@postgres:5432/localvision
+      DATABASE_URL: postgresql+psycopg://localsight:${DB_PASSWORD:-changeme}@postgres:5432/localsight
       JWT_SECRET: ${JWT_SECRET}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
       STORAGE_BACKEND: local
@@ -42,7 +42,7 @@ services:
       SSRF_ALLOWLIST: ${SSRF_ALLOWLIST:-}
       AI_DETECTOR: ${AI_DETECTOR:-reference}
       AI_IDENTITY_RECOGNITION_ENABLED: ${AI_IDENTITY_RECOGNITION_ENABLED:-false}
-      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@localvision.local}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@localsight.local}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-changeme}
       # Static token Prometheus presents when scraping /api/system/metrics
       # (must match infrastructure/monitoring/prometheus.yml credentials).
@@ -69,7 +69,7 @@ services:
     # "cannot be directly executed").
     command: python -c "from apps.worker.main import main; main()"
     environment:
-      DATABASE_URL: postgresql+psycopg://localvision:${DB_PASSWORD:-changeme}@postgres:5432/localvision
+      DATABASE_URL: postgresql+psycopg://localsight:${DB_PASSWORD:-changeme}@postgres:5432/localsight
       JWT_SECRET: ${JWT_SECRET}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY}
       STORAGE_BACKEND: local

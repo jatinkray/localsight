@@ -1,4 +1,4 @@
-# LocalVision production (Docker Compose) dependencies.
+# LocalSight production (Docker Compose) dependencies.
 # Extends the base requirements with the PostgreSQL driver the compose stack
 # requires (DATABASE_URL=postgresql+psycopg://...) plus optional-but-expected
 # runtime pieces (psutil for /api/system gauges). The base requirements.txt

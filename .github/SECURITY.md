@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-We take security vulnerabilities seriously. If you discover a security issue in LocalVision,
+We take security vulnerabilities seriously. If you discover a security issue in LocalSight,
 please report it responsibly.
 
 **Please DO NOT file a public GitHub issue for security vulnerabilities.**
@@ -15,11 +15,11 @@ Instead, report privately via one of:
 
 2. **Email** (if GitHub is unavailable)
    - Email the repository maintainers directly
-   - Use a subject line: `[LocalVision Security]`
+   - Use a subject line: `[LocalSight Security]`
 
 ## Scope
 
-In-scope: LocalVision codebase, its Python dependencies, Docker image, and CI/CD pipeline.
+In-scope: LocalSight codebase, its Python dependencies, Docker image, and CI/CD pipeline.
 
 Out-of-scope: Third-party cameras/NVRs, network infrastructure, operating system hardening.
 
@@ -34,7 +34,7 @@ Out-of-scope: Third-party cameras/NVRs, network infrastructure, operating system
 
 ## Security Scanner Findings
 
-LocalVision uses automated security scanning in CI:
+LocalSight uses automated security scanning in CI:
 
 | Tool | Checks | Frequency |
 |------|--------|-----------|

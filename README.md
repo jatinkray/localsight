@@ -1,4 +1,4 @@
-# LocalVision
+# LocalSight
 
 Local-first, privacy-by-design video intelligence platform. Continuously ingests
 RTSP/RTSPS/ONVIF streams from NVRs/IP cameras, runs **local** AI detection, tracking,
@@ -66,7 +66,7 @@ uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 The app **refuses to start** if `JWT_SECRET` / `MASTER_ENCRYPTION_KEY` are missing or
 still placeholders — there are no insecure defaults.
 
-Default DB is SQLite (`sqlite:///./localvision.db`); switch to PostgreSQL by setting
+Default DB is SQLite (`sqlite:///./localsight.db`); switch to PostgreSQL by setting
 `DATABASE_URL=postgresql+psycopg://...` (see compose for a pgvector setup).
 
 Run the AI/video worker (separate process) in another shell:
@@ -87,7 +87,7 @@ as background services.
 ```bash
 pip install -r requirements.txt
 pip install pytest pytest-cov httpx numpy
-rm -f test_localvision.db
+rm -f test_localsight.db
 pytest -q                       # 74 tests: auth, RBAC, SSRF, encryption, analytics, pipeline, API, live, alerts, ONNX detector, review regressions
 ```
 
@@ -156,11 +156,11 @@ All config is via environment (see `.env.example`). Highlights:
 | `STORAGE_BACKEND` | `local` | `local` \| `s3`. |
 | `STORAGE_LOCAL_ROOT` | `./data/storage` | Local recording/snapshot store. |
 | `ALERT_WEBHOOK_URL` | `""` | Optional global fallback webhook for all events. |
-| `LOCALVISION_LIVE_DIR` | `./data/live` | Directory for transcoded live HLS segments (served at `/live-media`). |
+| `LOCALSIGHT_LIVE_DIR` | `./data/live` | Directory for transcoded live HLS segments (served at `/live-media`). |
 
 ## Camera / NVR compatibility
 
-LocalVision is RTSP/ONVIF-native.
+LocalSight is RTSP/ONVIF-native.
 
 - **TP-Link VIGI / Tapo** work out of the box — `POST /api/cameras/from-nvr` provisions a
   whole VIGI NVR (all channels) in one call; `GET /api/cameras/presets` returns vendor
@@ -217,8 +217,8 @@ curl -s -X POST http://localhost:8000/api/alerts/routes \
    `/live-media/{camera_id}/index.m3u8`. The RTSP URL and credentials are never exposed.
 3. Point an HLS player at the manifest. The media gateway honors only valid tickets.
 4. Transcodes are lifecycle-managed: idle streams (no playback for
-   `LOCALVISION_LIVE_IDLE_TIMEOUT_SEC`, default 300 s) and streams older than
-   `LOCALVISION_LIVE_MAX_DURATION_SEC` (default 4 h) are reaped automatically;
+   `LOCALSIGHT_LIVE_IDLE_TIMEOUT_SEC`, default 300 s) and streams older than
+   `LOCALSIGHT_LIVE_MAX_DURATION_SEC` (default 4 h) are reaped automatically;
    `POST /api/live/{camera_id}/stop` stops one explicitly (dashboard control).
 
 ## Privacy masks
