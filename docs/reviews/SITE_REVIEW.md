@@ -1,5 +1,13 @@
 # LocalSight Marketing Site — Principal UI/UX Review
 
+> **Status: EXECUTED** — P0 and P1 shipped in pages-repo commit `41a94f2`
+> (verified live: axe zero violations, 12-slide carousel, metrics strip,
+> FAQ, JSON-LD, mobile sticky CTA with auto-hide). P2 remains honestly
+> gated: no testimonials/demo/star-counts until real usage exists.
+> The verification script's mobile pass caught two real defects before
+> ship (sticky bar covering FAQ taps; aria role misuse in the first
+> metrics markup) — both fixed before push.
+
 **Scope:** `localsight.github.io` (GitHub Pages, static HTML/CSS/JS, no build)
 **Method:** live audit (Playwright: structure, perf, axe-core, mobile), benchmark
 study (Frigate, Supabase, PostHog, Scrypted, VideoraIQ), NN/g usability findings,
