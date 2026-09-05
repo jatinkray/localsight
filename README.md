@@ -38,7 +38,7 @@ screen) and the [product tour on the project site](https://jatinkray.github.io/l
 | Auth / RBAC / MFA / audit | ✅ production | Argon2id, JWT rotation, TOTP MFA, lockout, RBAC, immutable audit log |
 | Envelope encryption (at rest) | ✅ production | Stream URLs, embeddings, snapshots, plate data, alert config, MQTT credentials |
 | SSRF egress guard | ✅ production | Blocks private/loopback/metadata unless `SSRF_ALLOWLIST` set |
-| Person/object detection | ✅ production | `reference` backend = CPU motion proxy (person-only). `onnx` backend for multi-class (person/vehicle/bicycle/motorcycle/bus/truck/animal/bag/package) via staged ONNX model; lazy `onnxruntime`, GPU auto-detected |
+| Person/object detection | ✅ production | `reference` backend = CPU motion proxy (person-only). `onnx` backend for multi-class (person/vehicle/bicycle/motorcycle/bus/truck/animal/bag/package) via staged ONNX model; lazy `onnxruntime`, GPU auto-detected. Both ultralytics export layouts supported (row-major + transposed v8/v11), COCO labels mapped to the platform vocabulary |
 | Tracking | ✅ production | SORT-style motion-prediction tracker for stable IDs; appearance ReID needs a staged embedding model |
 | Behavior analytics (rules) | ✅ production | Line-cross, intrusion, loitering, object-left/removed, crowd — per-camera JSON |
 | ANPR / LPR | ✅ pipeline; ⚙️ model-dependent | Cropped + throttled + deduped; plate values encrypted at rest. Real OCR needs a staged plate detector+OCR model |
@@ -81,6 +81,33 @@ as background services.
 
 > Recording and live view require **FFmpeg** on `PATH`. The Docker image bundles it;
 > for local installs install `ffmpeg` (e.g. `apt-get install ffmpeg`).
+
+## Local CCTV rig (test-drive on a MacBook)
+
+`scripts/local_cctv_rig.py` turns a MacBook into a one-camera NVR site — real
+FaceTime footage end-to-end through the exact operator path (RTSP broker →
+LocalSight → recording + AI + live view):
+
+```bash
+python scripts/local_cctv_rig.py setup          # brew: ffmpeg + mediamtx; .venv deps
+python scripts/local_cctv_rig.py start          # boot the rig (camera permission required)
+python scripts/local_cctv_rig.py verify         # 15-point end-to-end check
+python scripts/local_cctv_rig.py status         # processes / streams / camera state
+python scripts/local_cctv_rig.py watch          # tail all rig logs
+python scripts/local_cctv_rig.py stop           # tear down cleanly
+```
+
+The rig sets `SSRF_ALLOWLIST=127.0.0.0/8` (loopback broker), 30 s recording
+segments, and its own dev secrets under `.rig/` (gitignored). Grant Camera
+permission to your terminal when macOS prompts, or use `start --source synthetic`
+for a moving test pattern. Details: `python scripts/local_cctv_rig.py --help`.
+
+The rig runs the **staged YOLO11n detector** (registry-verified ONNX, CoreML
+on Apple Silicon) when `onnxruntime` is installed — real multi-class detection
+on the live feed. Remove the `AI_DETECTOR` line in the rig env (or uninstall
+`onnxruntime`) to fall back to the reference motion detector. The staged model
+lives in `models/staged/` with its SHA-256 in `models/registry.json` — the
+operator-side staging path any production model takes.
 
 ## Tests
 

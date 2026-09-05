@@ -99,11 +99,21 @@ def _make_person(client, admin_auth, label="w3-person"):
 
 
 def _png_bytes() -> bytes:
-    # 1x1 PNG
-    return bytes.fromhex(
-        "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
-        "1f15c4890000000d49444154789c626001000000ffff030000060005"
-        "57bfabd40000000049454e44ae426082")
+    # A VALID 1x1 white PNG (the old placeholder was a malformed hex blob that
+    # ffmpeg cannot decode — the staged embedder decodes uploads to pixels, so
+    # enrollment now requires a readable image, as it would in production).
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        c = struct.pack(">I", len(data)) + tag + data
+        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    # scanline = filter byte (0) + 1 RGB pixel
+    idat = zlib.compress(b"\x00\xff\xff\xff")
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
 
 
 def test_references_metadata_shape(client, admin_auth):

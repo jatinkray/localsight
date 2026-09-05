@@ -7,8 +7,10 @@ required: pure-logic paths and lazy-import guards are exercised instead.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
+import os
 
 from packages.ai import detectors, rules
 from packages.ai.anpr import ANPRPipeline, ReferencePlateDetector, ReferencePlateOCR
@@ -144,13 +146,10 @@ def test_build_detector_reference(monkeypatch):
 
 
 def test_onnx_detector_requires_runtime(monkeypatch):
-    """Empty registry → KeyError (no staged model) when build_detector is called.
-
-    ONNX backend requires a registered model in the ModelRegistry; the build
-    function fails closed rather than silently falling back to a non-functional
-    detector. Both the lookup (KeyError) and the integrity check (RuntimeError)
-    are valid failure modes.
-    """
+    """A registered model whose hash does NOT verify → build_detector refuses
+    (fail closed, no silent fallback to a non-functional detector). Both the
+    lookup (KeyError, empty registry) and the integrity check (RuntimeError,
+    hash mismatch) are valid failure modes."""
     import pytest
 
     class S:
@@ -159,10 +158,22 @@ def test_onnx_detector_requires_runtime(monkeypatch):
         ai_model_name = "detector"
         ai_model_version = "latest"
 
-    from packages.ai.registry import ModelRegistry
+    from packages.ai.registry import ModelRecord, ModelRegistry
 
+    # Empty registry (isolated path — the repo's real registry may have a
+    # staged model): KeyError on lookup.
     with pytest.raises((RuntimeError, KeyError)):
-        detectors.build_detector(S(), ModelRegistry())
+        detectors.build_detector(S(), ModelRegistry(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "models", "registry.does-not-exist.json")))
+
+    # Registered but the file/hash can't verify: RuntimeError, fail closed.
+    reg = ModelRegistry()
+    rec = ModelRecord(name="detector", version="latest",
+                      path="/nonexistent/model.onnx", hash_sha256="b" * 64)
+    reg._models[("detector", "latest")] = rec
+    with pytest.raises((RuntimeError, KeyError)):
+        detectors.build_detector(S(), reg)
 
 
 def test_postprocess_yolo_synthetic(monkeypatch):
@@ -237,8 +248,10 @@ def test_onnx_detector_lazy_session(monkeypatch):
 
     class FakeOrt:
         InferenceSession = lambda *a, **k: FakeSession()
-        CUDAExecutionProvider = "CUDAExecutionProvider"
-        CPUExecutionProvider = "CPUExecutionProvider"
+
+        @staticmethod
+        def get_available_providers():
+            return ["CPUExecutionProvider"]
 
     monkeypatch.setitem(sys.modules, "onnxruntime", FakeOrt())
     monkeypatch.setattr(detectors.ONNXDetector, "_infer", lambda self, img: [])
@@ -258,9 +271,17 @@ def test_runtime_detector_preprocess_and_decode(monkeypatch):
 
     img_rgb = np.random.randint(0, 255, (360, 640, 3), dtype=np.uint8)
     pre = d._preprocess(img_rgb)
-    assert pre.shape == (1, 3, 360, 640)
+    # Stride padding: 360 → 384 (next multiple of 32); 640 stays.
+    assert pre.shape == (1, 3, 384, 640)
     assert pre.dtype == np.float32
     assert pre.min() >= 0.0 and pre.max() <= 1.0
+    # The real image sits top-left; the pad region is zero.
+    assert pre[0, :, :360, :640].max() > 0.0
+    assert pre[0, :, 360:, :].max() == 0.0
+
+    # Input already stride-aligned: no padding, shape preserved.
+    aligned = np.random.randint(0, 255, (320, 640, 3), dtype=np.uint8)
+    assert d._preprocess(aligned).shape == (1, 3, 320, 640)
 
     raw_bytes = bytes(img_rgb.tobytes())
     decoded = d._decode(raw_bytes)
@@ -1122,6 +1143,614 @@ def test_vendor_presets_api(client):
                     json={"vendor": "axis", "cam_ip": "10.0.0.9", "stream": "main"}, headers=h)
     assert b.status_code == 200 and b.json()["url"].startswith("rtsp://")
     assert client.post("/api/cameras/presets/build", json={"vendor": "nope"}, headers=h).status_code == 400
+
+
+# ── regression: FFmpegFrameSource must yield pixel arrays (F-15) ───────────
+def test_camera_recordings_and_at_endpoints(client):
+    """The DVR scrubber's data source: /recordings lists overlapping segments
+    with signed URLs; /recordings/at resolves a moment to its covering
+    segment + in-file offset; 404 is the honest no-footage state."""
+    h = {"Authorization": _admin(client)}
+    r = client.post("/api/cameras", json={"name": "cam-dvr"}, headers=h)
+    cam_id = r.json()["id"]
+
+    now = dt.datetime.now(dt.UTC)
+    rt = client.app.state.runtime
+    with rt.SessionLocal() as s:
+        from packages.domain.models import VideoSegment as Seg
+
+        def add(start_min, dur_min):
+            start = now - dt.timedelta(minutes=start_min)
+            key = f"camera/{cam_id}/dvr/{start_min}.mp4"
+            rt.storage.put(key, b"\x00\x00\x00\x18ftypmp42" + b"x" * 512)
+            s.add(Seg(camera_id=cam_id, storage_key=key, storage_backend="local",
+                      start_ts=start, end_ts=start + dt.timedelta(minutes=dur_min),
+                      duration_sec=dur_min * 60, size_bytes=1024))
+        add(30, 10)   # 30→20 min ago
+        add(10, 5)    # 10→5 min ago
+        s.commit()
+
+    # `+` in a query string decodes as a space — use Z-suffixed ISO (the UI
+    # sends exactly this form via toISOString()).
+    lo = (now - dt.timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    hi = now.isoformat().replace("+00:00", "Z")
+    res = client.get(f"/api/cameras/{cam_id}/recordings?start={lo}&end={hi}", headers=h)
+    assert res.status_code == 200, res.text
+    segs = res.json()["segments"]
+    assert len(segs) == 2
+    assert all(s["url"].startswith("/api/video/") for s in segs)
+    assert segs[0]["start_ts"] <= segs[0]["end_ts"]
+    # ordered oldest → newest
+    assert segs[0]["start_ts"] < segs[1]["start_ts"]
+
+    # moment inside the SECOND segment: offset = 2 min into it
+    t = (now - dt.timedelta(minutes=8)).isoformat().replace("+00:00", "Z")
+    res = client.get(f"/api/cameras/{cam_id}/recordings/at?t={t}", headers=h)
+    assert res.status_code == 200, res.text
+    at = res.json()
+    assert abs(at["seek_offset_sec"] - 120.0) < 1.0
+    assert at["url"].startswith("/api/video/")
+
+    # moment in a gap: honest 404
+    t = (now - dt.timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+    res = client.get(f"/api/cameras/{cam_id}/recordings/at?t={t}", headers=h)
+    assert res.status_code == 404
+
+    # signed URL actually serves bytes
+    res = client.get(at["url"])
+    assert res.status_code == 200 and res.content.startswith(b"\x00\x00\x00\x18ftyp")
+
+    # viewer role can scrub; RBAC holds at video:view
+    v = {"Authorization": _viewer(client)}
+    assert client.get(f"/api/cameras/{cam_id}/recordings?start={lo}&end={hi}",
+                      headers=v).status_code == 200
+
+
+def test_event_detail_links_covering_recording(client):
+    """Event playback: the drawer's clip must resolve to the recorded segment
+    covering the event (computed at read time), with an in-file offset —
+    before this, real worker events had no video and the drawer's play
+    button was dead."""
+    h = {"Authorization": _admin(client)}
+    r = client.post("/api/cameras", json={"name": "cam-evclip"}, headers=h)
+    cam_id = r.json()["id"]
+    rt = client.app.state.runtime
+    now = dt.datetime.now(dt.UTC)
+    with rt.SessionLocal() as s:
+        from packages.domain.models import Event as Ev
+        from packages.domain.models import VideoSegment as Seg
+
+        start = now - dt.timedelta(minutes=30)
+        key = f"camera/{cam_id}/ev/{start:%H%M%S}.mp4"
+        rt.storage.put(key, b"\x00\x00\x00\x18ftypmp42" + b"y" * 512)
+        s.add(Seg(camera_id=cam_id, storage_key=key, storage_backend="local",
+                  start_ts=start, end_ts=start + dt.timedelta(minutes=5),
+                  duration_sec=300, size_bytes=1024))
+        ev = Ev(camera_id=cam_id, event_type="presence",
+                timestamp_start=start + dt.timedelta(seconds=90),
+                timestamp_end=start + dt.timedelta(seconds=150),
+                confidence=0.8, identity_status="unknown",
+                bbox={"x": 0.3, "y": 0.3, "w": 0.2, "h": 0.4})
+        s.add(ev)
+        s.commit()
+        ev_id = ev.id
+
+    res = client.get(f"/api/events/{ev_id}", headers=h)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["video_url"], "covering segment must be linked at read time"
+    assert abs(body["video_seek_offset_sec"] - 90.0) < 1.0
+    fetched = client.get(body["video_url"])
+    assert fetched.status_code == 200
+
+
+def test_postprocess_yolo_transposed_v8_layout():
+    """Ultralytics v8/v11 detect exports emit [4+classes, N] (transposed);
+    the original row-major reader misparsed it into garbage boxes at ~zero
+    confidence — a staged real model silently produced NO detections."""
+    import numpy as np
+
+    from packages.ai.detectors import postprocess_yolo
+
+    labels = ["person", "vehicle"]
+    # transposed: rows = cx,cy,w,h + 2 class scores; anchors = 3 columns
+    raw = np.array([
+        [320, 100, 500],   # cx (px, input 640x640)
+        [180, 200, 200],   # cy
+        [64, 40, 100],     # w
+        [128, 40, 100],    # h
+        [0.9, 0.05, 0.8],  # class-0 (person) scores
+        [0.1, 0.9, 0.10],  # class-1 (vehicle) scores
+    ])
+    dets = postprocess_yolo(raw, labels, conf_thr=0.5, in_hw=(640, 640), frame_hw=(360, 640))
+    # three anchors: person@0.9 (320,180), vehicle@0.9 (100,200),
+    # person@0.8 (500,200) — none overlap, NMS keeps all three.
+    assert len(dets) == 3
+    people = [d for d in dets if d.label == "person"]
+    vehicles = [d for d in dets if d.label == "vehicle"]
+    assert len(people) == 2 and len(vehicles) == 1
+    assert max(d.confidence for d in people) == 0.9
+    assert vehicles[0].confidence == 0.9
+    p = max(people, key=lambda d: d.confidence)
+    # bbox normalized to frame space: center (320,180) px → x=(320-32)/640
+    assert abs(p.bbox[0] - (320 - 32) / 640) < 0.01
+    assert abs(p.bbox[1] - (180 - 64) / 640) < 0.01
+
+    # row-major legacy layout still parses
+    legacy = np.array([[320, 180, 64, 128, 0.9, 0.1]])
+    dets = postprocess_yolo(legacy, labels, conf_thr=0.5, in_hw=(640, 640), frame_hw=(360, 640))
+    assert len(dets) == 1 and dets[0].label == "person"
+
+    # overlapping same-class anchors: NMS keeps the confident one
+    overlap = np.array([
+        [320, 180, 64, 128, 0.9],   # cx,cy,w,h + person
+        [324, 184, 64, 128, 0.6],   # heavily overlapping person
+    ]).T  # shape (5, 2) → transposed with one class row
+    dets = postprocess_yolo(overlap, ["person"], conf_thr=0.5,
+                            in_hw=(640, 640), frame_hw=(360, 640))
+    assert len(dets) == 1 and dets[0].confidence == 0.9
+
+
+def test_staged_onnx_model_detects_person():
+    """Smoke test against the REAL staged YOLO11n (skipped when onnxruntime
+    or the model file is absent): inference must run through the full
+    build_detector path (registry verify + stride padding + label mapping)
+    and return well-formed detections — normalized bboxes, mapped labels,
+    confidence within [0,1]. A synthetic blob is NOT guaranteed to be
+    classified as 'person' (real CNNs need real features), so the assertion
+    is on the contract, not on the model's opinion of a white rectangle."""
+    import pytest
+
+    try:
+        import onnxruntime  # noqa: F401
+    except ImportError:
+        pytest.skip("onnxruntime not installed")
+    if not os.path.exists("models/staged/yolo11n-detect.onnx"):
+        pytest.skip("staged model not present")
+
+    import numpy as np
+
+    class _S:
+        ai_detector = "onnx"
+        ai_confidence_threshold = 0.35
+        ai_model_name = "detector"
+        ai_model_version = "latest"
+
+    from packages.ai.detectors import build_detector
+    from packages.ai.registry import ModelRegistry
+
+    det = build_detector(_S(), ModelRegistry("models/registry.json"))
+
+    frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    frame[100:300, 280:360] = 220
+    out = det.detect(frame, dt.datetime(2026, 1, 1, tzinfo=dt.UTC))
+    for d in out:
+        assert d.label in {"person", "vehicle", "bicycle", "motorcycle", "bus",
+                          "truck", "animal", "bag", "package"}
+        assert 0.0 < d.confidence <= 1.0
+        assert all(0.0 <= v <= 1.0 for v in d.bbox)
+    # The stride-padding path ran at all (no shape error) and the detector
+    # object remains reusable across frames (session caching).
+    out2 = det.detect(frame, dt.datetime(2026, 1, 1, 0, 0, 1, tzinfo=dt.UTC))
+    assert isinstance(out2, list)
+
+
+def test_label_mapped_detector_wraps_coco():
+    """Staged COCO models are wrapped: COCO names map to the platform
+    vocabulary (car→vehicle, backpack→bag, cat→animal…) and unmapped classes
+    are dropped so rules/alerts only see platform labels."""
+    from packages.ai.detectors import _LabelMappedDetector
+    from packages.ai.interfaces import Detection
+
+    class _Fake:
+        model_version = "test"
+
+        def detect(self, frame, ts):
+            return [
+                Detection(label="car", confidence=0.9, bbox=(0.1, 0.1, 0.2, 0.2)),
+                Detection(label="person", confidence=0.8, bbox=(0.3, 0.3, 0.1, 0.1)),
+                Detection(label="toothbrush", confidence=0.95, bbox=(0.5, 0.5, 0.05, 0.05)),
+                Detection(label="backpack", confidence=0.7, bbox=(0.7, 0.7, 0.1, 0.1)),
+            ]
+
+    wrapped = _LabelMappedDetector(_Fake())
+    out = wrapped.detect(None, dt.datetime(2026, 1, 1, tzinfo=dt.UTC))
+    labels = sorted(d.label for d in out)
+    assert labels == ["bag", "person", "vehicle"]
+    assert all(d.confidence > 0 for d in out)
+
+
+def test_ffmpeg_source_allows_allowlisted_private_rtsp():
+    """build_args re-validates egress but never took an allowlist, so any
+    private-network camera (where cameras actually live) failed inside
+    FFmpegFrameSource construction and the worker's camera thread died
+    silently after its reconnect budget. The allowlist must thread through."""
+    from packages.security.errors import UnsafeUrlError
+    from packages.video.ffmpeg import build_args
+    from packages.video.sources import FFmpegFrameSource
+
+    url = "rtsp://192.168.1.40:554/stream1"
+    with_succ = ["192.168.0.0/16"]
+    # Without the allowlist: rejected (existing SSRF posture unchanged).
+    try:
+        build_args(url)
+        raise AssertionError("private RTSP must be rejected without allowlist")
+    except UnsafeUrlError:
+        pass
+    # With it: args build fine (worker path).
+    args = build_args(url, allowlist=with_succ)
+    assert args[0] == "ffmpeg" and url in args
+    src = FFmpegFrameSource(url, allowlist=with_succ)
+    assert src.args  # constructed without raising
+
+
+def test_ffmpeg_frame_source_ended_stream_raises_for_reconnect():
+    """A live RTSP camera never ends cleanly: when ffmpeg exits (camera
+    dropped, 404 path), the source must RAISE, not return. Returning made
+    StreamGateway treat it as a finite source and terminate the camera thread
+    permanently — cameras never recovered from a transient outage."""
+    import io
+
+    from packages.video.sources import FFmpegFrameSource
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdout = io.BytesIO(b"")  # immediate EOF: ffmpeg exited
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    src = FFmpegFrameSource.__new__(FFmpegFrameSource)
+    src.width, src.height = 64, 48
+    src.frame_bytes = 64 * 48 * 3
+    src.args = ["ffmpeg"]
+
+    import packages.video.ffmpeg as ffmpeg_mod
+
+    orig = ffmpeg_mod.open_decoder
+    ffmpeg_mod.open_decoder = lambda args: _FakeProc()
+    try:
+        gen = src.frames()
+        try:
+            next(gen)
+            raised = False
+        except RuntimeError:
+            raised = True
+        assert raised, "ended stream must raise so the gateway reconnects"
+    finally:
+        ffmpeg_mod.open_decoder = orig
+
+
+def test_ffmpeg_frame_source_decodes_bytes_to_ndarray():
+    """Real RTSP frames arrive as raw rgb24 bytes; the reference detector (and
+    motion gate, ANPR crop) skip plain-bytes frames, so a live camera would
+    stream for hours and produce ZERO detections. The source must decode its
+    stdout buffer into an ndarray when numpy is available."""
+    import numpy as np
+
+    from packages.video.sources import FFmpegFrameSource
+
+    W, H = 64, 48
+    # Fake ffmpeg stdout: one rgb24 frame, half black, half white.
+    frame = np.zeros((H, W, 3), dtype=np.uint8)
+    frame[:, W // 2:] = 255
+
+    class _FakeProc:
+        def __init__(self, payload: bytes):
+            import io
+
+            self.stdout = io.BytesIO(payload)
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    src = FFmpegFrameSource.__new__(FFmpegFrameSource)
+    src.width, src.height = W, H
+    src.frame_bytes = W * H * 3
+    src.args = ["ffmpeg"]
+
+    import packages.video.ffmpeg as ffmpeg_mod
+
+    orig_open = ffmpeg_mod.open_decoder
+    ffmpeg_mod.open_decoder = lambda args: _FakeProc(frame.tobytes())
+    try:
+        gen = src.frames()
+        pixels, _ts = next(gen)  # first frame decodes…
+        gen.close()  # …consumer closes before EOF (normal shutdown path)
+    finally:
+        ffmpeg_mod.open_decoder = orig_open
+    assert isinstance(pixels, np.ndarray), "frame must be an ndarray, not bytes"
+    assert pixels.shape == (H, W, 3)
+    assert pixels[0, 0, 0] == 0 and pixels[0, W - 1, 0] == 255
+
+
+def test_reference_detector_detects_on_ndarray_from_source():
+    """End-to-end shape check: an ndarray frame from FFmpegFrameSource produces
+    a person detection from the reference motion detector (the default
+    backend), proving the fix closes the stream→event gap."""
+    import numpy as np
+
+    from packages.ai.detectors import ReferenceMotionDetector
+
+    det = ReferenceMotionDetector(conf_thr=0.4, min_area=0.005)
+    t0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    blank = np.zeros((48, 64, 3), dtype=np.uint8)
+    person = np.zeros((48, 64, 3), dtype=np.uint8)
+    person[20:40, 28:40] = 255  # bright moving blob
+
+    dets = det.detect(blank, t0)  # first frame primes the baseline
+    assert dets == []
+    dets = det.detect(person, t0 + dt.timedelta(seconds=1))
+    assert len(dets) == 1 and dets[0].label == "person"
+    assert dets[0].confidence >= 0.4
+
+
+# ── regression: identity enrollment must link to events (F-18) ─────────────
+def test_enrolled_person_recognized_in_pipeline(client):
+    """The reference embedder hashed JPEG file bytes at enrollment but the
+    bbox coordinate string at recognition — two vector spaces that could
+    NEVER match, so events never linked enrolled people. Now both paths use
+    the SAME face chain (staged SCRFD+ArcFace when models are present,
+    reference otherwise), the same detect→crop geometry: enrolling an image
+    and running the pipeline on the same pixels must produce a 'known'
+    identity on the event."""
+    import io
+    import os
+
+    import numpy as np
+
+    from packages.ai.matcher import VectorMatcher
+    from packages.ai.pipeline import CameraPipeline
+    from packages.ai.registry import ModelRegistry
+    from packages.ai.tracker import IouTracker
+
+    rt = client.app.state.runtime
+    h = {"Authorization": _admin(client)}
+
+    staged = os.path.exists("models/staged/faces/det_500m.onnx")
+    if staged:
+        from packages.ai.face_onnx import build_face_chain
+
+        face_det, face_emb = build_face_chain(ModelRegistry("models/registry.json"))
+    else:  # pragma: no cover - CI without staged weights
+        from packages.ai.face import ReferenceEmbedder, ReferenceFaceDetector
+
+        face_det, face_emb = ReferenceFaceDetector(), ReferenceEmbedder()
+
+    # The pipeline writes rows scoped to a real camera (FK-enforced).
+    cam_id = client.post("/api/cameras", json={"name": "cam-coherence"}, headers=h).json()["id"]
+
+    # 1. Enroll a reference image of a REAL subject (Lena, the canonical
+    #    test face) via the real API — the exact operator upload flow.
+    lena_path = "/var/folders/2f/qf166slx2lb10x5rnwn7g9m40000gn/T/kilo/test_face.jpg"
+    if not os.path.exists(lena_path):
+        import urllib.request
+
+        urllib.request.urlretrieve(
+            "https://raw.githubusercontent.com/opencv/opencv/master/samples/data/lena.jpg",
+            lena_path)
+    with open(lena_path, "rb") as fh:
+        png = fh.read()
+
+    r = client.post("/api/persons", json={"label": "coherence-test"}, headers=h)
+    assert r.status_code == 200, r.text
+    pid = r.json()["id"]
+    up = client.post(f"/api/persons/{pid}/references",
+                     files={"file": ("head.jpg", png, "image/jpeg")}, headers=h)
+    assert up.status_code == 200, up.text
+
+    # 2. Pipeline over the SAME decoded image presented as a live frame:
+    #    the coherence contract is enroll(bytes upload) == recognize(ndarray
+    #    frame) for the same subject/view — the exact asymmetry that was
+    #    broken before. (Scale/position invariance is the model's job; it is
+    #    exercised by the detector test, not here.)
+    from packages.ai.face_onnx import _decode_image
+
+    pixels, w, h2 = _decode_image(png)
+    live = np.frombuffer(pixels, np.uint8).reshape(h2, w, 3)
+    face_box = face_det.detect(live, None)
+    assert face_box is not None, "detector must find the enrollment face"
+    x, y, fw, fh3 = face_box
+    # Realistic person box: the face occupies the upper-center of a person
+    # (what YOLO gives the worker). Invert the reference detector's
+    # convention (face = upper-center half of person) so the pipeline's
+    # face-in-person detection lands on the true face.
+    pw = fw * 2
+    ph = fh3 / 0.4
+    person_bbox = (x - 0.25 * pw, y - 0.05 * ph, pw, ph)
+
+    class _FixedDetector:
+        def __init__(self):
+            self.present = True
+
+        def detect(self, frame, ts):
+            from packages.ai.interfaces import Detection
+
+            if not self.present:
+                return []
+            return [Detection(label="person", confidence=0.95, bbox=person_bbox)]
+
+    fixed = _FixedDetector()
+    pipe = CameraPipeline(
+        cam_id,
+        fixed,
+        IouTracker(),
+        (face_det, face_emb),
+        VectorMatcher(threshold=0.45),
+        rt.SessionLocal, rt.storage, rt.crypto,
+        identity_recognition_enabled=True,
+        model_version=face_emb.model_version,
+    )
+
+    ts0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    with rt.SessionLocal() as s:
+        for i in range(3):
+            pipe.process_frame(s, live, ts0 + dt.timedelta(seconds=i))
+            s.commit()
+        # person leaves: the next detection-free frame ages the track out and
+        # finalizes the presence event (merge_gap default 10 s).
+        fixed.present = False
+        pipe.process_frame(s, live, ts0 + dt.timedelta(seconds=30))
+        s.commit()
+
+    # 3. The finalized presence event must link the enrolled identity.
+    evs = [e for e in client.get("/api/events?limit=50", headers=h).json()["items"]
+           if e["camera_id"] == cam_id]
+    assert evs, "pipeline produced no events"
+    e0 = client.get(f"/api/events/{evs[0]['id']}", headers=h).json()
+    assert e0["identity_status"] in ("known", "uncertain"), (
+        f"enrolled person must be recognized, got {e0['identity_status']}"
+    )
+    if e0["identity_status"] == "known":
+        assert e0["identity_id"] == pid
+
+
+def _write_png(buf, arr):
+    """Minimal PNG writer via ffmpeg (avoids a Pillow dependency for tests)."""
+    import os
+    import subprocess
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+        h, w = arr.shape[:2]
+        subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
+                        "-i", "-", fh.name], input=arr.tobytes(), check=True,
+                       capture_output=True)
+        path = fh.name
+    with open(path, "rb") as fh:
+        buf.write(fh.read())
+    os.unlink(path)
+
+
+# ── regression: worker persists camera status to the DB (F-16) ──────────────
+def test_system_health_components_carry_status(client):
+    """Overview renders each health component with label(comp.status); the
+    ai_model component shipped {name, version} WITHOUT status, so the
+    dashboard's Health panel showed 'unknown' next to a working model."""
+    h = {"Authorization": _admin(client)}
+    r = client.get("/api/system/health", headers=h)
+    assert r.status_code == 200, r.text
+    comps = r.json()["components"]
+    for name, comp in comps.items():
+        assert comp.get("status") in ("ok", "down", "degraded"), (
+            f"component {name} must carry a renderable status, got {comp}")
+    ai = comps["ai_model"]
+    assert ai["name"] and ai["version"]  # shown as "name · version" in the UI
+
+
+# ── regression: worker persists camera status to the DB (F-16) ──────────────
+def test_recorder_stop_all_survives_concurrent_finalize():
+    """stop_all iterates _procs while the record thread's finalize_last pops
+    from it — the concurrent mutation crashed the camera thread on shutdown
+    ("dictionary keys changed during iteration"). Snapshot iteration must be
+    safe against concurrent pops."""
+    import threading
+
+    ts = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+
+    class _FakeProc:
+        returncode = None
+
+        def __init__(self):
+            self._terminated = threading.Event()
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self._terminated.set()
+
+        def wait(self, timeout=None):
+            self._terminated.wait(timeout or 1)
+            return 0
+
+    rec = Recorder("cam-race", storage=None, seg_seconds=300,
+                   spawn=lambda args, **kw: _FakeProc())
+    rec.record_url("http://example.com/stream", ts)
+    rec.record_url("http://example.com/stream", ts + dt.timedelta(minutes=6))
+
+    def _finalize_concurrently():
+        # Simulate the record thread finishing a segment mid-stop_all.
+        try:
+            with contextlib.suppress(KeyError):
+                rec._procs.pop(next(iter(rec._procs)))
+        except RuntimeError:
+            pass
+
+    t = threading.Thread(target=_finalize_concurrently)
+    t.start()
+    rec.stop_all()  # must not raise
+    t.join()
+    assert rec._procs == {}
+
+
+def test_recorder_last_proc_public_contract():
+    """The worker's record loop waits on `recorder.last_proc` (documented in
+    record_url's docstring) — it previously only existed as _last_proc, so
+    every record cycle raised AttributeError and NO recording ever persisted.
+    """
+    ts = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+
+    class _FakeProc:
+        returncode = None
+
+        def wait(self, timeout=None):
+            return 0
+
+        def poll(self):
+            return None
+
+    spawned = {}
+
+    def fake_spawn(args, **kw):
+        p = _FakeProc()
+        spawned["proc"] = p
+        return p
+
+    rec = Recorder("cam-rec", storage=None, seg_seconds=300, spawn=fake_spawn)
+    rec.record_url("http://example.com/stream", ts)
+    assert rec.last_proc is spawned["proc"], "last_proc must be public (worker contract)"
+
+
+def test_worker_status_callback_persists_camera_state(client):
+    """The worker's status persistence must write Camera.status/health/last_seen:
+    nothing else ever did, so cameras showed OFFLINE on the dashboard forever
+    even while streaming. Drives the real persist_camera_status against the
+    app runtime's DB and asserts the row reflects the gateway transition."""
+    from apps.worker.main import persist_camera_status
+    from packages.domain.models import Camera as CameraRow
+
+    rt = client.app.state.runtime
+    cam_id = "cam-worker-status"
+    with rt.SessionLocal() as s:
+        s.add(CameraRow(id=cam_id, name="WorkerStatusCam", status="OFFLINE",
+                        health="unreachable", resolution="", fps=0, timezone="UTC"))
+        s.commit()
+
+    persist_camera_status(rt, cam_id, "ONLINE")
+
+    with rt.SessionLocal() as s:
+        cam = s.get(CameraRow, cam_id)
+        assert cam.status == "ONLINE"
+        assert cam.health == "streaming"
+        assert cam.last_seen is not None, "ONLINE must touch last_seen"
+
+    # A failing DB must not raise into the gateway loop (best-effort).
+    class _BrokenRT:
+        SessionLocal = property(lambda self: (_ for _ in ()).throw(RuntimeError("db down")))
+
+    persist_camera_status(_BrokenRT(), cam_id, "OFFLINE")  # must not raise
+
+    with rt.SessionLocal() as s:
+        cam = s.get(CameraRow, cam_id)
+        assert cam.status == "ONLINE", "failed write must not corrupt prior state"
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────

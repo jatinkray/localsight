@@ -1,5 +1,6 @@
 # LocalSight
 .env
+.rig/
 *.db
 *.sqlite3
 __pycache__/
