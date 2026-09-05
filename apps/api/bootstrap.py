@@ -77,7 +77,22 @@ def build(settings: Settings) -> Runtime:
         storage = LocalFilesystemStorage(settings.storage_local_root, settings.master_encryption_key)
 
     registry = ModelRegistry("models/registry.json")
-    embedder = ReferenceEmbedder()
+    # Staged face models (SCRFD + ArcFace) when present and verified; the
+    # deterministic reference embedder otherwise. NOT gated on the identity-
+    # recognition flag: enrollment must use the SAME model the worker will
+    # recognize with (vectors only compare within a model version), and the
+    # operator flow "enroll first, enable recognition later" is legitimate —
+    # enrolling with a different embedder than recognition would silently
+    # never match (the bug this replaces).
+    embedder = None
+    try:
+        from packages.ai.face_onnx import build_face_chain as staged_chain
+
+        _fdet, embedder = staged_chain(registry)
+    except Exception:  # noqa: BLE001 - fall back, models optional
+        pass
+    if embedder is None:
+        embedder = ReferenceEmbedder()
 
     rt = Runtime(settings, engine, SessionLocal, crypto, storage, registry, embedder)
     init_db(rt)

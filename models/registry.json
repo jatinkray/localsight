@@ -1,1 +1,28 @@
-{}
+{
+  "models": [
+    {
+      "name": "detector",
+      "version": "latest",
+      "path": "models/staged/yolo11n-detect.onnx",
+      "hash_sha256": "634279b40c07c6391472c51ad45b81ebc48706a9a1fe72dd3396322acd0c053b",
+      "source": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.onnx",
+      "license": "AGPL-3.0 (Ultralytics YOLO11n, COCO-pretrained)"
+    },
+    {
+      "name": "face_detector",
+      "version": "latest",
+      "path": "models/staged/faces/det_500m.onnx",
+      "hash_sha256": "5e4447f50245bbd7966bd6c0fa52938c61474a04ec7def48753668a9d8b4ea3a",
+      "source": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip",
+      "license": "MIT (InsightFace SCRFD 500M)"
+    },
+    {
+      "name": "face_embedder",
+      "version": "latest",
+      "path": "models/staged/faces/w600k_mbf.onnx",
+      "hash_sha256": "9cc6e4a75f0e2bf0b1aed94578f144d15175f357bdc05e815e5c4a02b319eb4f",
+      "source": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip",
+      "license": "MIT (InsightFace ArcFace MobileFaceNet, w600k)"
+    }
+  ]
+}
