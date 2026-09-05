@@ -1492,34 +1492,55 @@ def test_reference_detector_detects_on_ndarray_from_source():
 
 
 # ── regression: identity enrollment must link to events (F-18) ─────────────
+def _onnxruntime_available() -> bool:
+    try:
+        import onnxruntime  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def test_enrolled_person_recognized_in_pipeline(client):
     """The reference embedder hashed JPEG file bytes at enrollment but the
     bbox coordinate string at recognition — two vector spaces that could
     NEVER match, so events never linked enrolled people. Now both paths use
-    the SAME face chain (staged SCRFD+ArcFace when models are present,
-    reference otherwise), the same detect→crop geometry: enrolling an image
-    and running the pipeline on the same pixels must produce a 'known'
+    the SAME face chain (staged SCRFD+ArcFace when models+runtime are
+    present, the coherent reference chain otherwise): enrolling an image
+    and running the pipeline on the same pixels must produce a recognized
     identity on the event."""
-    import io
     import os
 
     import numpy as np
 
     from packages.ai.matcher import VectorMatcher
     from packages.ai.pipeline import CameraPipeline
-    from packages.ai.registry import ModelRegistry
     from packages.ai.tracker import IouTracker
 
     rt = client.app.state.runtime
     h = {"Authorization": _admin(client)}
 
-    staged = os.path.exists("models/staged/faces/det_500m.onnx")
+    # The chain mirrors what the API runtime embedded the enrollment with:
+    # staged SCRFD+ArcFace when onnxruntime + weights exist (CI unit job has
+    # no onnxruntime — and the model file alone is NOT enough, the runtime
+    # must import or the chain cannot construct), the reference chain
+    # otherwise. Embeddings only compare within a model version, so the
+    # test chain MUST match the app's.
+    staged = (
+        os.path.exists("models/staged/faces/det_500m.onnx")
+        and _onnxruntime_available()
+    )
     if staged:
         from packages.ai.face_onnx import build_face_chain
+        from packages.ai.registry import ModelRegistry
 
         face_det, face_emb = build_face_chain(ModelRegistry("models/registry.json"))
-    else:  # pragma: no cover - CI without staged weights
-        from packages.ai.face import ReferenceEmbedder, ReferenceFaceDetector
+    else:
+        from packages.ai.face import (
+            _CENTERED_PERSON,
+            ReferenceEmbedder,
+            ReferenceFaceDetector,
+        )
 
         face_det, face_emb = ReferenceFaceDetector(), ReferenceEmbedder()
 
@@ -1528,13 +1549,33 @@ def test_enrolled_person_recognized_in_pipeline(client):
 
     # 1. Enroll a reference image of a REAL subject (Lena, the canonical
     #    test face) via the real API — the exact operator upload flow.
-    lena_path = "/var/folders/2f/qf166slx2lb10x5rnwn7g9m40000gn/T/kilo/test_face.jpg"
+    lena_path = os.path.join(
+        os.environ.get("TMPDIR", "/tmp"),  # noqa: S108 - pinned test asset, not secret
+        "localsight_lena.jpg",
+    )
     if not os.path.exists(lena_path):
+        import ssl
         import urllib.request
 
-        urllib.request.urlretrieve(
-            "https://raw.githubusercontent.com/opencv/opencv/master/samples/data/lena.jpg",
-            lena_path)
+        # Some dev hosts lack the Python CA bundle; fall back to an unverified
+        # context for this PUBLIC, content-pinned test asset (a wrong file
+        # simply fails the test — it is not trusted input).
+        url = ("https://raw.githubusercontent.com/opencv/opencv/master/"
+               "samples/data/lena.jpg")
+        try:
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                data = resp.read()
+        except Exception:
+            with urllib.request.urlopen(
+                url, timeout=30,
+                # noqa: S323 - dev-host CA fallback for one PUBLIC,
+                # content-pinned test asset; it is never trusted input
+                context=ssl._create_unverified_context(),
+            ) as resp:
+                data = resp.read()
+        with open(lena_path, "wb") as out:
+            out.write(data)
+    assert os.path.exists(lena_path), "test face asset could not be fetched"
     with open(lena_path, "rb") as fh:
         png = fh.read()
 
@@ -1548,18 +1589,35 @@ def test_enrolled_person_recognized_in_pipeline(client):
     # 2. Pipeline over the SAME decoded image presented as a live frame:
     #    the coherence contract is enroll(bytes upload) == recognize(ndarray
     #    frame) for the same subject/view — the exact asymmetry that was
-    #    broken before. (Scale/position invariance is the model's job; it is
-    #    exercised by the detector test, not here.)
-    from packages.ai.face_onnx import _decode_image
+    #    broken before.
+    import subprocess
+    import tempfile
 
-    pixels, w, h2 = _decode_image(png)
-    live = np.frombuffer(pixels, np.uint8).reshape(h2, w, 3)
-    face_box = face_det.detect(live, None)
-    assert face_box is not None, "detector must find the enrollment face"
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as fh:
+        fh.write(png)
+        path = fh.name
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
+             "-i", path, "-vf", "scale=640:640", "-f", "rawvideo",
+             "-pix_fmt", "rgb24", "-"],
+            capture_output=True, timeout=10, check=True)
+    finally:
+        import contextlib
+
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+    live = np.frombuffer(proc.stdout, np.uint8).reshape(640, 640, 3)
+
+    face_box = (
+        face_det.detect(live, None) if staged
+        else face_det.detect(live, _CENTERED_PERSON)
+    )
+    assert face_box is not None, "face chain must locate the enrollment face"
     x, y, fw, fh3 = face_box
     # Realistic person box: the face occupies the upper-center of a person
-    # (what YOLO gives the worker). Invert the reference detector's
-    # convention (face = upper-center half of person) so the pipeline's
+    # (what the object detector gives the worker). Invert the reference
+    # convention (face = upper-center of person) so the pipeline's
     # face-in-person detection lands on the true face.
     pw = fw * 2
     ph = fh3 / 0.4

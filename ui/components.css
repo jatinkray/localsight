@@ -581,11 +581,11 @@ body.drawer-open { overflow: hidden; } /* lock scroll behind drawer */
 .dvr-badge {
   font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.06em;
   padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-s);
-  background: oklch(0.62 0.19 25); color: #fff; cursor: pointer; min-width: 3.5em;
+  background: #c93a38; color: #fff; cursor: pointer; min-width: 3.5em;
   text-align: center; font-variant-numeric: tabular-nums;
   border: none; font-family: inherit;
 }
-.dvr-badge.live { background: oklch(0.62 0.19 25); }
+.dvr-badge.live { background: #c93a38; }
 .dvr-badge.live::before { content: "●"; margin-inline-end: 0.35em; animation: dvr-pulse 2s infinite; }
 .dvr-badge.archive { background: var(--surface-2); color: var(--text-1); cursor: pointer;
   border: 1px solid var(--border-1); }
