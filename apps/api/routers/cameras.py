@@ -10,10 +10,12 @@ Security notes:
 """
 from __future__ import annotations
 
+import datetime as dt
 from urllib.parse import urlparse, urlunparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.audit import write_audit
@@ -446,3 +448,118 @@ def delete_camera(camera_id: str, request: Request, db: Session = Depends(get_db
         except Exception:
             pass
     return {"ok": True}
+
+
+# ── NVR archive: per-camera recordings for scrub-back playback ──────────────
+#
+# The dashboard's live-view DVR player scrubs from "now" back into the
+# archive. It needs the segment timeline for a camera (time-ordered, with
+# durations) plus short-lived signed playback URLs per segment — the same
+# scheme event media uses. Only rows whose file actually landed in storage
+# are listed (size > 0): the recorder writes the row only after a successful
+# put_stream, so an operator never scrubs into a hole that 404s.
+
+def _parse_ts(value: str, field: str) -> dt.datetime:
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"bad {field}: use ISO 8601") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    return parsed
+
+
+def _aware(value: dt.datetime | None) -> dt.datetime | None:
+    """SQLite returns naive datetimes; normalize to UTC for arithmetic with
+    aware parsed inputs (PostgreSQL returns aware — this is a no-op there)."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=dt.UTC)
+
+
+@router.get("/cameras/{camera_id}/recordings",
+            dependencies=[Depends(require_permission("video:view"))])
+def camera_recordings(
+    camera_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    rt: Runtime = Depends(get_runtime),
+    start: str = Query(..., description="ISO 8601 lower bound (UTC)"),
+    end: str = Query(..., description="ISO 8601 upper bound (UTC)"),
+    limit: int = Query(500, le=1000, ge=1),
+):
+    """Time-ordered recording segments overlapping [start, end], each with a
+    signed playback URL (300 s). This is the scrubber's data source: the
+    client maps any wall-clock time to the segment whose [start_ts, end_ts]
+    contains it, then seeks to the offset within that segment's file."""
+    cam = db.get(Camera, camera_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="camera not found")
+    lo = _parse_ts(start, "start")
+    hi = _parse_ts(end, "end")
+    if hi <= lo:
+        raise HTTPException(status_code=400, detail="end must be after start")
+    rows = db.execute(
+        select(VideoSegment)
+        .where(VideoSegment.camera_id == camera_id)
+        .where(VideoSegment.start_ts < hi)
+        .where(VideoSegment.end_ts > lo)
+        .where(VideoSegment.size_bytes > 0)
+        .order_by(VideoSegment.start_ts.asc())
+        .limit(limit)
+    ).scalars().all()
+    return {
+        "camera_id": camera_id,
+        "start": iso(lo),
+        "end": iso(hi),
+        "segments": [
+            {
+                "id": s.id,
+                "start_ts": iso(s.start_ts),
+                "end_ts": iso(s.end_ts),
+                "duration_sec": s.duration_sec,
+                "size_bytes": s.size_bytes,
+                "url": rt.storage.sign_get_url(s.storage_key, expires_sec=300),
+            }
+            for s in rows
+        ],
+    }
+
+
+@router.get("/cameras/{camera_id}/recordings/at",
+            dependencies=[Depends(require_permission("video:view"))])
+def recording_at(
+    camera_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    rt: Runtime = Depends(get_runtime),
+    t: str = Query(..., description="ISO 8601 wall-clock time (UTC)"),
+):
+    """The single segment containing time `t`, with a signed URL and the
+    offset-in-file to seek to. 404 when nothing covers that moment (no
+    recording, retention, or gap before the first segment) — the client's
+    honest 'no footage at this time' state."""
+    cam = db.get(Camera, camera_id)
+    if not cam:
+        raise HTTPException(status_code=404, detail="camera not found")
+    ts = _parse_ts(t, "t")
+    seg = db.execute(
+        select(VideoSegment)
+        .where(VideoSegment.camera_id == camera_id)
+        .where(VideoSegment.start_ts <= ts)
+        .where(VideoSegment.end_ts >= ts)
+        .where(VideoSegment.size_bytes > 0)
+        .order_by(VideoSegment.start_ts.asc())
+        .limit(1)
+    ).scalars().first()
+    if not seg:
+        raise HTTPException(status_code=404, detail="no recording at this time")
+    return {
+        "camera_id": camera_id,
+        "segment_id": seg.id,
+        "start_ts": iso(seg.start_ts),
+        "end_ts": iso(seg.end_ts),
+        "duration_sec": seg.duration_sec,
+        "seek_offset_sec": max(0.0, (ts - _aware(seg.start_ts)).total_seconds()),
+        "url": rt.storage.sign_get_url(seg.storage_key, expires_sec=300),
+    }

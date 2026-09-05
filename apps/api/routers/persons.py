@@ -111,10 +111,15 @@ async def add_reference(
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="reference image too large (max 10MB)")
 
-    # Local embedding generation (no external API). Reference embedder is
-    # deterministic on the image bytes; a production face model would detect and
-    # align a face first.
-    emb = rt.embedder.embed(data, None)
+    # Local embedding generation (no external API): the staged face chain
+    # (SCRFD detect + ArcFace embed, same as worker-side recognition) or the
+    # deterministic reference embedder when no models are staged. A no-face
+    # or unreadable upload is a 422 — never a silently-garbage vector that
+    # can never match (the old behavior: any bytes were accepted).
+    try:
+        emb = rt.embedder.embed(data, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     record = PersonEmbedding(
         person_id=person.id,
         embedding_enc=rt.crypto.encrypt_json(emb),

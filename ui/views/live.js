@@ -19,6 +19,7 @@ import { h, render } from "../core/dom.js";
 import { api, ApiError, can } from "../core/api.js";
 import { fmtRelative, label, tone } from "../core/format.js";
 import { emptyState, errorState } from "../core/states.js";
+import { DvrScrubber } from "./dvr_scrubber.js";
 
 const LAYOUTS = [1, 2, 3]; // 1×1, 2×2, 3×3
 const WALL_CYCLE_MS = 8000;
@@ -28,6 +29,7 @@ let wallMode = false;
 let wallTimer = null;
 let activeTile = -1;
 let hlsLibPromise = null;
+let activeScrubbers = []; // destroyed + rebuilt on every loadLive paint
 
 /** Lazy-load vendored hls.js only when Live View opens (plan §III.9). */
 async function ensureHls() {
@@ -122,8 +124,24 @@ function liveTile(cam, idx) {
     "aria-hidden": "true",
   });
 
+  // DVR scrub bar (video:view-gated server-side; hidden for roles without it
+  // so the UI never promises playback the API would 403).
+  const dvr = can("video:view")
+    ? new DvrScrubber(cam, {
+        videoEl: video,
+        onPlaybackState: (st) => {
+          if (st === "archive") stateEl.textContent = "";
+          else if (st === "no-footage") stateEl.textContent = "No footage at this time";
+          else if (st === "loading") stateEl.textContent = "Loading recording…";
+          else if (st === "error") stateEl.textContent = "Playback failed";
+          // "live": the ticket flow restart speaks for itself.
+        },
+      })
+    : null;
+
   const tile = h("div", { class: "live-tile", dataset: { camId: cam.id, idx: String(idx) } },
     h("div", { class: "live-video-wrap" }, video, stateEl),
+    dvr ? dvr.el : null,
     h("div", { class: "live-tile-bar" },
       statusDot,
       h("span", { class: "live-tile-name" }, cam.name),
@@ -140,7 +158,7 @@ function liveTile(cam, idx) {
       ),
     ),
   );
-  return { tile, video, stateEl };
+  return { tile, video, stateEl, dvr };
 }
 
 function focusTile(delta = null) {
@@ -230,6 +248,10 @@ export async function loadLive(gridEl) {
   const grid = h("div", { id: "live-grid", class: tileClass() });
   const tiles = list.map((c, i) => liveTile(c, i));
   tiles.forEach(({ tile }) => grid.append(tile));
+  // Re-render replaces every tile's DOM: retire the previous paint's
+  // scrubbers (interval timers, pending fetches) so nothing leaks.
+  activeScrubbers.forEach((s) => s.destroy());
+  activeScrubbers = tiles.map((t) => t.dvr).filter(Boolean);
   render(gridEl, [
     grid,
     h("p", { class: "muted live-hint" },
@@ -237,9 +259,18 @@ export async function loadLive(gridEl) {
   ]);
 
   // Start streams only for visible tiles (3×3 starts all; wall focus starts one).
-  tiles.forEach(({ video, stateEl }, i) => {
+  tiles.forEach(({ video, stateEl, dvr }, i) => {
     const cam = list[i];
     startStream(cam, video, stateEl);
+    if (dvr) {
+      // Scrub-back hands the <video> element back to the ticket flow on
+      // resume — the exact same restart path as the tile's first paint.
+      dvr.setLiveResume(() => startStream(cam, video, stateEl));
+      // Archive playback needs the element exclusively: destroy hls.js /
+      // clear the manifest src before swapping in the recorded segment.
+      dvr.setLiveTeardown(() => stopStream(video));
+      dvr.refreshSegments();
+    }
   });
 
   // Reaper awareness: poll active streams and surface idle age on tiles.

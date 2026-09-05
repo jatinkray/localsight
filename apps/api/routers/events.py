@@ -153,12 +153,43 @@ def get_event(event_id: str, request: Request, db: Session = Depends(get_db), rt
         raise HTTPException(status_code=404, detail="event not found")
     snapshot_url = None
     video_url = None
+    seg_start = None
     if ev.snapshot_key_enc:
         key = rt.crypto.decrypt_str(ev.snapshot_key_enc)
         snapshot_url = rt.storage.sign_get_url(key, expires_sec=300)
     if ev.video_segment_key_enc:
+        # Explicit link (seeded/exported events): the stored key wins.
         key = rt.crypto.decrypt_str(ev.video_segment_key_enc)
         video_url = rt.storage.sign_get_url(key, expires_sec=300)
+    else:
+        # Read-time covering-segment resolution: the worker's analytic events
+        # are point-in-time rows written on the frame path — joining to the
+        # recorder's segment table there would couple the hot loop to recorder
+        # state and STILL miss events that closed before their covering
+        # segment finalized. Resolving here means every event (pre- and
+        # post-link) plays back from the drawer, with a fresh signed URL.
+        seg = db.execute(
+            select(VideoSegment)
+            .where(VideoSegment.camera_id == ev.camera_id)
+            .where(VideoSegment.start_ts <= ev.timestamp_start)
+            .where(VideoSegment.end_ts >= ev.timestamp_start)
+            .where(VideoSegment.size_bytes > 0)
+            .order_by(VideoSegment.start_ts.asc())
+            .limit(1)
+        ).scalars().first()
+        if seg is not None:
+            video_url = rt.storage.sign_get_url(seg.storage_key, expires_sec=300)
+            seg_start = seg.start_ts
+
+    def _utc(value: dt.datetime | None) -> dt.datetime | None:
+        # SQLite returns naive datetimes; normalize both sides of the
+        # subtraction (no-op on PostgreSQL, which returns aware).
+        if value is None or value.tzinfo is not None:
+            return value
+        return value.replace(tzinfo=dt.UTC)
+
+    ev_start = _utc(ev.timestamp_start)
+    seg_start_utc = _utc(seg_start)
     return {
         "id": ev.id, "camera_id": ev.camera_id, "track_id": ev.track_id,
         "identity_id": ev.identity_id, "identity_status": ev.identity_status,
@@ -167,6 +198,10 @@ def get_event(event_id: str, request: Request, db: Session = Depends(get_db), rt
         "timestamp_end": iso(ev.timestamp_end),
         "confidence": ev.confidence, "bbox": ev.bbox,
         "snapshot_url": snapshot_url, "video_url": video_url,
+        "video_seek_offset_sec": (
+            max(0.0, (ev_start - seg_start_utc).total_seconds())
+            if seg_start_utc is not None else None
+        ),
     }
 
 

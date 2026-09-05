@@ -63,11 +63,23 @@ def system_health(request: Request, _: User = Depends(get_current_user),
         db_ok = True
     except Exception:
         db_ok = False
+    # The AI-model component is healthy when the configured detector backend
+    # is resolvable. The worker fails closed on a bad backend (its log carries
+    # the reason); the API vouches for what it can build. The version shown
+    # is the registry version the worker resolves for AI_MODEL_NAME — the
+    # embedder's ref-v0 only matters for identity recognition, so it is not
+    # the detector's identity.
+    ai_ok = bool(rt.embedder and getattr(rt.embedder, "model_version", ""))
+    det_name = rt.settings.ai_detector
+    det_version = getattr(rt.settings, "ai_model_version", "latest")
+    if det_name in ("reference", "synthetic"):
+        det_version = "ref-motion-v0"
     return {
-        "status": "ok" if db_ok else "degraded",
+        "status": "ok" if db_ok and ai_ok else "degraded",
         "components": {
             "database": {"status": "ok" if db_ok else "down"},
-            "ai_model": {"name": rt.settings.ai_detector, "version": rt.embedder.model_version},
+            "ai_model": {"name": det_name, "version": det_version,
+                         "status": "ok" if ai_ok else "down"},
         },
         "generated_at": dt.datetime.now(dt.UTC),
     }

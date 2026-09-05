@@ -191,11 +191,19 @@ export async function openEventDrawer(eventId, { onClose } = {}) {
       ));
     }
     if (ev.video_url) {
+      const clip = h("video", {
+        class: "clip-player", controls: true, preload: "metadata",
+      });
+      // Land the playhead inside the covering segment so "play" starts at
+      // the event moment, not at the segment's beginning.
+      const seekTo = Number(ev.video_seek_offset_sec || 0);
+      if (seekTo > 0) {
+        clip.addEventListener("loadedmetadata", () => { clip.currentTime = seekTo; }, { once: true });
+      }
+      clip.src = ev.video_url;
       body.push(h("div", { class: "drawer-section" },
         h("h3", {}, "Clip"),
-        h("video", {
-          class: "clip-player", src: ev.video_url, controls: true, preload: "metadata",
-        }),
+        clip,
         h("div", { class: "muted expiry-note" }, ""),
       ));
     }
