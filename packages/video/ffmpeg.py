@@ -20,13 +20,21 @@ def build_args(
     rtsp_transport: str = "tcp",
     hwaccel: str | None = None,
     pix_fmt: str = "rgb24",
+    allowlist: list[str] | None = None,
 ) -> list[str]:
     """Return a safe argv list that pipes decoded raw frames to stdout.
 
     The URL has already been SSRF-validated by the caller; we still re-validate
-    here as defense in depth.
+    here as defense in depth — WITH the deploy-time allowlist, like every
+    other egress call site (recorder, live gateway, snapshot). Without it,
+    a private-network camera (where cameras actually live) failed here and
+    the worker's camera thread died silently after its reconnect budget.
     """
-    validate_egress_url(url, allowed_schemes={"rtsp", "rtsps", "http", "https"})
+    validate_egress_url(
+        url,
+        allowed_schemes={"rtsp", "rtsps", "http", "https"},
+        allowlist=allowlist,
+    )
     args = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
     args += ["-rtsp_transport", rtsp_transport]
     if hwaccel:

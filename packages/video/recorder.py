@@ -129,6 +129,20 @@ class Recorder:
         self._last_seg = seg
         return seg
 
+    @property
+    def last_proc(self) -> Optional[subprocess.Popen]:
+        """The ffmpeg process spawned by the most recent `record_url` call.
+
+        Part of the documented caller contract ("wait on last_proc, then
+        finalize_last") — the worker's record loop uses it, so it must be a
+        public attribute, not an internal one.
+        """
+        return self._last_proc
+
+    @property
+    def last_seg(self) -> Optional[VideoSegment]:
+        return self._last_seg
+
     def _actual_duration(self, path: str) -> Optional[float]:
         """Probe the real duration of a finished segment via ffprobe.
 
@@ -196,8 +210,16 @@ class Recorder:
         return seg
 
     def stop_all(self) -> None:
-        """Terminate all in-flight segments and reap their processes."""
-        for p in self._procs.values():
+        """Terminate all in-flight segments and reap their processes.
+
+        Snapshot the dicts first: the record thread's finalize_last pops from
+        _procs concurrently, and iterating a dict while another thread mutates
+        it raises "dictionary keys changed during iteration" — which crashes
+        the camera thread during shutdown (observed live: worker teardown
+        after a camera went unreachable).
+        """
+        procs = list(self._procs.values())
+        for p in procs:
             if p.poll() is None:
                 try:
                     p.terminate()
@@ -205,7 +227,7 @@ class Recorder:
                     pass
         # Reap so terminated ffmpeg children don't linger as zombies.
         deadline = _time.monotonic() + 5.0
-        for p in self._procs.values():
+        for p in procs:
             try:
                 p.wait(timeout=max(0.1, deadline - _time.monotonic()))
             except Exception:  # noqa: BLE001 - best-effort reap
