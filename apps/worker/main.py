@@ -11,6 +11,7 @@ out to the configured alert channels.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import os
 import queue
@@ -310,12 +311,39 @@ def make_detector(settings: Settings, registry) -> Detector:
     return build_detector(settings, registry)
 
 
-def build_make_source(camera: Camera, settings: Settings, crypto):
+def make_face_chain(settings: Settings, registry):
+    """Build the face detection+embedding chain for identity recognition.
+
+    Staged SCRFD+ArcFace models (registry-verified) when present; the
+    deterministic reference chain otherwise. Unlike the object detector, a
+    missing face model DOWNGRADES (with a log) rather than failing closed:
+    identity recognition is an optional capability, and the reference chain
+    keeps the enroll→recognize loop exercisable without staged weights.
+    """
+    if settings.ai_identity_recognition_enabled:
+        try:
+            from packages.ai.face_onnx import build_face_chain as staged_chain
+
+            return staged_chain(registry)
+        except Exception as exc:  # noqa: BLE001 - downgrade, not a crash
+            log.warning(
+                "identity recognition falling back to reference chain "
+                "(staged face models unavailable: %s)", exc,
+            )
+    return (ReferenceFaceDetector(), ReferenceEmbedder())
+
+
+def build_make_source(camera: Camera, settings: Settings, crypto,
+                      allowlist: list[str] | None = None):
     sub_url = camera.substream_url_enc
     if sub_url:
         plain = crypto.decrypt_str(sub_url)
+
         def make():
-            return FFmpegFrameSource(plain, width=640, height=360, fps=settings.ai_inference_fps)
+            return FFmpegFrameSource(
+                plain, width=640, height=360, fps=settings.ai_inference_fps,
+                allowlist=allowlist,
+            )
         return make
     return lambda: SyntheticFrameSource(fps=settings.ai_inference_fps)
 
@@ -332,6 +360,31 @@ def _safe_alert_detail(detail: dict | None) -> dict:
     return {k: detail[k] for k in _ALERT_DETAIL_KEYS if k in detail}
 
 
+def persist_camera_status(rt, cid: str, st: str) -> None:
+    """Persist a gateway state transition to Camera.status/health/last_seen.
+
+    The dashboard, analytics overview, and capacity views read these columns
+    from the DB — before this existed nothing ever wrote them after camera
+    creation, so cameras showed OFFLINE forever even while streaming.
+    """
+    try:
+        with rt.SessionLocal() as s:
+            cam = s.get(Camera, cid)
+            if cam is None:
+                return
+            cam.status = st
+            cam.health = {
+                "ONLINE": "streaming",
+                "RECONNECTING": "unstable",
+                "OFFLINE": "unreachable",
+            }.get(st, st.lower())
+            if st == "ONLINE":
+                cam.last_seen = timeutil.utcnow()
+            s.commit()
+    except Exception as exc:  # health persistence is best-effort
+        log.warning("failed to persist status %s for %s: %s", st, cid, exc)
+
+
 def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
     settings = rt.settings
     try:
@@ -340,7 +393,7 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
         log.critical("camera %s not started: detector backend failed to load: %s", camera.id, exc)
         return
     tracker = IouTracker(iou_threshold=settings.ai_iou_threshold)
-    face_chain = (ReferenceFaceDetector(), ReferenceEmbedder())
+    face_chain = make_face_chain(settings, rt.registry)
     matcher = VectorMatcher(threshold=settings.ai_similarity_threshold)
 
     rule_engine = None
@@ -399,16 +452,28 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
         threading.Thread(target=_record_loop, name=f"rec-{camera.id}", daemon=True).start()
 
     def make_source():
-        return build_make_source(camera, settings, rt.crypto)()
+        return build_make_source(camera, settings, rt.crypto,
+                                 allowlist=settings.ssrf_allowlist_cidrs)()
 
     def _on_status(cid: str, st: str) -> None:
         log.info("camera %s -> %s", cid, st)
+        persist_camera_status(rt, cid, st)
         # RECONNECTING/DISCONNECT states are the health signal the capacity
-        # planner and alerting depend on; emit as a counter.
+        # planner and alerting depend on; emit as a counter. The gateway's
+        # streaming state is named ONLINE (not STREAMING) — the stale metric
+        # label never matched it.
         if st in ("RECONNECTING", "DISCONNECTED", "OFFLINE"):
             metrics.inc("camera_disconnects_total", labels=f'camera="{cid}"')
-        metrics.set("camera_status", 1.0 if st == "STREAMING" else 0.0,
+        metrics.set("camera_status", 1.0 if st == "ONLINE" else 0.0,
                     labels=f'camera="{cid}"')
+
+    def _heartbeat(cid: str) -> None:
+        """Touch last_seen while frames flow (between status transitions)."""
+        with contextlib.suppress(Exception), rt.SessionLocal() as s:
+            cam = s.get(Camera, cid)
+            if cam is not None and cam.status == "ONLINE":
+                cam.last_seen = timeutil.utcnow()
+                s.commit()
 
     gateway = StreamGateway(camera.id, make_source, on_status=_on_status)
     log.info("starting pipeline for camera %s (%s)", camera.id, camera.name)
@@ -417,10 +482,17 @@ def run_camera(rt, camera: Camera, stop: threading.Event) -> None:
     # previously never emitted — see report D-3).
     _fps_window: list[float] = []
     _last_frame_ts: dt.datetime | None = None
+    _last_heartbeat: float = 0.0
 
     for frame, ts in gateway.iter_frames():
         if stop.is_set():
             break
+        # Bounded DB touch (≤1 per 30 s) so last_seen tracks liveness between
+        # status transitions without turning the hot frame path into a
+        # per-frame DB write.
+        if time.time() - _last_heartbeat > 30.0:
+            _heartbeat(camera.id)
+            _last_heartbeat = time.time()
         t0 = time.perf_counter()
         session = rt.SessionLocal()
         try:
